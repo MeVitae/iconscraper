@@ -10,8 +10,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-
-	"github.com/disintegration/imaging"
 )
 
 func getImageSize(url string, images *[]Images) {
@@ -42,7 +40,7 @@ func getImageSize(url string, images *[]Images) {
 		return
 	}
 
-	img, err := imaging.Decode(bytes.NewReader(body))
+	img, _, err := image.Decode(bytes.NewReader(body))
 	if err != nil {
 		return
 	}
