@@ -20,71 +20,44 @@ import (
 type result struct {
 	domain string
 	icon   string
-	done   int // 0 not started, 1 in progress, 2 done
 }
 
 type processReturn struct {
-	index   int
+	domain  string
 	picture string
 }
 
 var maxConcurrentProcesses = 2
 
-func getNextProcess(processes *[]result) (result result, domainIndex int) {
-	for index, domain := range *processes {
-		if domain.done == 0 {
-			domain.done = 1
-			(*processes)[index] = domain
-			result = domain
-			domainIndex = index
-			return
-		}
-	}
-	return
-}
-
 func main() {
-	val := make(chan processReturn)
-	jobsDone := 0
 	domains := readDomains()
+	urls := make(chan string, len(domains))
+	returns := make(chan processReturn)
 
-	numberDone := 0
-	for index, domain := range domains {
-		if numberDone < maxConcurrentProcesses {
-			domains[index].done = 1
-			go func(index int, domain result) {
-				fmt.Println("Started working on:", domain)
-				processImageGetting(domain.domain, 120, val, index)
-			}(index, domain)
-			numberDone++
-		}
+	workers := len(domains)
+	if workers > maxConcurrentProcesses {
+		workers = maxConcurrentProcesses
 	}
 
-	for jobsDone != len(domains) {
-		select {
-		case jobIndex := <-val:
-			jobsDone++
-			domains[jobIndex.index].done = 2
-			domains[jobIndex.index].icon = jobIndex.picture
+	for worker := 0; worker < workers; worker++ {
+		go processImageGetting(urls, 120, returns)
+	}
 
-			fmt.Println("Finished working on:", domains[jobIndex.index])
+	for _, domain := range domains {
+		urls <- domain.domain
+	}
 
-			domain, index := getNextProcess(&domains)
-			if domain.domain != "" {
-				go func(index int, domain result) {
-					fmt.Println("Started working on:", domain)
-					processImageGetting(domain.domain, 120, val, index)
-				}(index, domain)
-			}
+	results := make(map[string]string, len(domains))
+	for result := range returns {
+		results[result.domain] = result.picture
+		if len(results) == len(domains) {
+			break
 		}
 	}
+	close(urls)
+
 	fmt.Println("------ Finished -------")
-	fmt.Println(domains)
-}
-
-func testSingleDomain() {
-	val := make(chan processReturn)
-	processImageGetting("southerncompany.com", 120, val, 1)
+	fmt.Println(results)
 }
 
 var wg sync.WaitGroup
@@ -106,39 +79,42 @@ type Images struct {
 	size [2]int
 }
 
-func processImageGetting(url string, bestSize int, rez chan processReturn, myIndex int) {
+func processImageGetting(urls chan string, bestSize int, rez chan processReturn) {
+	for url := range urls {
+		fmt.Println("Started working on:", url)
 
-	htmlContent, err := getHTML(getFinalUrl(url))
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-	}
-	doc, err := html.Parse(strings.NewReader(htmlContent))
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	images := make([]Images, 0)
-	manifest := ""
-
-	getImages(doc, &images, &manifest, getFinalUrl(url))
-	if manifest != "" {
-		jsonStr, err := getManifestData(getFinalUrl(url) + manifest)
-		var app App
-		err = json.Unmarshal([]byte(jsonStr), &app)
+		htmlContent, err := getHTML(getFinalUrl(url))
 		if err != nil {
-			fmt.Println("Error:", err)
+			fmt.Printf("Error: %v\n", err)
+		}
+		doc, err := html.Parse(strings.NewReader(htmlContent))
+		if err != nil {
+			log.Fatal(err)
 		}
 
-		for _, icon := range app.Icons {
-			sizes := strings.Split(icon.Sizes, "x")
-			width, _ := strconv.Atoi(sizes[0])
-			height, _ := strconv.Atoi(sizes[1])
-			size := [2]int{width, height}
-			images = append(images, Images{src: icon.Src, size: size})
+		images := make([]Images, 0)
+		manifest := ""
+
+		getImages(doc, &images, &manifest, getFinalUrl(url))
+		if manifest != "" {
+			jsonStr, err := getManifestData(getFinalUrl(url) + manifest)
+			var app App
+			err = json.Unmarshal([]byte(jsonStr), &app)
+			if err != nil {
+				fmt.Println("Error:", err)
+			}
+
+			for _, icon := range app.Icons {
+				sizes := strings.Split(icon.Sizes, "x")
+				width, _ := strconv.Atoi(sizes[0])
+				height, _ := strconv.Atoi(sizes[1])
+				size := [2]int{width, height}
+				images = append(images, Images{src: icon.Src, size: size})
+			}
+			rez <- processReturn{domain: url, picture: pickBestImage(bestSize, images).src}
 		}
-		rez <- processReturn{index: myIndex, picture: pickBestImage(bestSize, images).src}
+		rez <- processReturn{domain: url, picture: pickBestImage(bestSize, images).src}
 	}
-	rez <- processReturn{index: myIndex, picture: pickBestImage(bestSize, images).src}
 }
 
 func pickBestImage(target int, images []Images) Images {
