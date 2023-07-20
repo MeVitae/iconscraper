@@ -1,4 +1,4 @@
-module getIcon
+module github.com/MeVitae/icon-scraper
 
 go 1.20
 
