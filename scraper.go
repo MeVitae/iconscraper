@@ -2,69 +2,79 @@
 package scraper
 
 import (
+	"fmt"
 	"image"
+	"os"
+	"sync"
 )
 
 // processReturn is the struct used to store values received when a channel worker sends back a result.
 type processReturn struct {
-	// Domain is simply the domain that was processed.
+	// domain is simply the domain that was processed.
 	domain string
 
-	// Result holds the acctual result of the worker, it holds the URL,Image and Source.
-	result Result
+	// result holds the acctual result of the worker, it holds the URL,Image and Source.
+	result Icon
 }
 
-// Result represents the data being returned from a certain operation.
-type Result struct {
+// Icon is an icon
+type Icon struct {
 	// URL is the source location from which the data was fetched or derived.
 	URL string
 
 	// Image holds the image data returned as a result.
+	//
 	// It implements the image.Image interface, enabling various image operations.
 	Image image.Image
 
-	// Source contains additional data related to the result.
-	// This can be used to store supplementary information or any data relevant to the returned result.
+	// Source is the image source as downloaded.
 	Source []byte
 }
 
-// ScrapeAll scrapes images from the provided domains concurrently and returns the results as a map with the best image based on the given target.
-// It fetches images from the given domains using multiple worker goroutines to achieve parallelism.
-// The function returns a map with domain names as keys and their corresponding Result as values.
-// The Result struct contains information about the URL, the image data, and additional source data.
+// logErrors logs all the errors sent on the channel to stderr
+func logErrors(errors chan error) {
+	for err := range errors {
+		fmt.Fprintln(os.Stderr, err.Error())
+	}
+}
+
+// GetIcons scrapes icons from the provided domains concurrently and returns the results as a map from domain to the best image based on the given target.
+//
+// It fetches images from the given domains using multiple worker goroutines.
 //
 // Parameters:
-//   - domains: A list of strings representing the domains from which images need to be scraped.
-//   - targetImgSize: An integer representing the target size of the images to be fetched (e.g., width or height).
+//   - domains: The domains from which icons are to be scraped.
+//   - squareOnly: If true, only square icons are considered.
+//   - targetHeight: An integer representing the target height of the images to be fetched (height).
 //   - maxConcurrentProcesses: An integer defining the maximum number of concurrent worker goroutines to be used.
 //     The function will limit the number of workers to this value if it exceeds the length of domains.
-//
-// Returns:
-// A map[string]Result: The map containing domain names as keys and their corresponding Result as values.
-//
-// Example:
-// domains := []string{"https://example.com", "https://test.com", "https://yourdomain.com"}
-// targetSize := 500 // Set your target image size here.
-// maxProcesses := 5 // Set your desired maximum concurrent processes here.
-// results := ScrapeAll(domains, targetSize, maxProcesses)
-func ScrapeAll(domains []string, targetImgSize, maxConcurrentProcesses int) map[string]Result {
+func GetIcons(domains []string, squareOnly bool, targetHeight, maxConcurrentProcesses int) map[string]Icon {
+	// Fill the urls channel (it cannot become full because we gave it the correct capacity)
 	urls := make(chan string, len(domains))
-	returns := make(chan processReturn)
-
 	for _, domain := range domains {
 		urls <- domain
 	}
+	// Create a wait group that waits for all the domains to be completed
+	wg := sync.WaitGroup{}
+	wg.Add(len(domains))
 
+	// Create a channel for sending errors to
+	errors := make(chan error)
+	go logErrors(errors)
+	// Create a channel to send results to
+	returns := make(chan processReturn)
+
+	// Calculate the number of workers required
 	workers := len(domains)
 	if workers > maxConcurrentProcesses {
 		workers = maxConcurrentProcesses
 	}
 
 	for worker := 0; worker < workers; worker++ {
-		go processImageGetting(urls, targetImgSize, returns)
+		go processImageGetting(urls, squareOnly, targetHeight, returns, errors, &wg)
 	}
 
-	results := make(map[string]Result, len(domains))
+	results := make(map[string]Icon, len(domains))
 	for domainResult := range returns {
 		results[domainResult.domain] = domainResult.result
 		if len(results) == len(domains) {
@@ -72,39 +82,25 @@ func ScrapeAll(domains []string, targetImgSize, maxConcurrentProcesses int) map[
 		}
 	}
 	close(urls)
+	wg.Wait()
 
 	return results
 }
 
-// ScrapeOne scrapes images from the provided domain and returns the result the best image based on the given target.
-// It fetches images from the given domain using a worker goroutine to perform the operation.
-// The function returns a Result struct containing information about the URL, the image data, and additional source data.
+// GetIcon scrapes icons from the provided domain and returns the smallest icon taller than the target height, or the largest icon if none are taller).
 //
 // Parameters:
-// - domain: A string representing the domain from which the image needs to be scraped.
-// - targetImgSize: An integer representing the target size of the image to be fetched (e.g., width or height).
-//
-// Returns:
-// Result: The Result struct containing information about the URL, the image data, and additional source data.
-//
-// Example:
-// domain := "https://example.com"
-// targetSize := 500 // Set your target image size here.
-// result := ScrapeOne(domain, targetSize)
-func ScrapeOne(domain string, targetImgSize int) Result {
-	urls := make(chan string, 1)
-	returns := make(chan processReturn)
+//   - domains: The domains from which icons are to be scraped.
+//   - squareOnly: If true, only square icons are considered.
+//   - targetHeight: An integer representing the target height of the images to be fetched (height).
+func GetIcon(domain string, squareOnly bool, targetHeight int) (*Icon, error) {
+	// Create a channel for sending errors to
+	errors := make(chan error)
+	go logErrors(errors)
 
-	urls <- domain
-
-	go processImageGetting(urls, targetImgSize, returns)
-
-	result := Result{}
-	for domainResult := range returns {
-		result = domainResult.result
-		break
+	res, err := processDomain(domain, squareOnly, targetHeight, errors)
+	if res == nil {
+		return nil, err
 	}
-	close(urls)
-
-	return result
+	return &res.result, err
 }

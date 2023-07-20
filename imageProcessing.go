@@ -4,69 +4,56 @@ import (
 	"bytes"
 	"fmt"
 	"image"
-	"math"
 	"net/http"
-	"net/url"
 	"strings"
 )
 
-// getImageSize fetches the image data from the specified URL, decodes it, and appends information about the image
-// to the provided list of images ([]imagesStruct). It supports both regular image formats and ICO files.
-// If the URL is not a valid image or an error occurs during the process, the function returns without appending any image data.
+// getImage fetches the image data from the specified URL, decodes it, and returns information about the image.
 //
-// Parameters:
+// It supports both regular image formats and ICO files.
 //
-//	url (string): The URL from which to fetch the image data.
-//	images (*[]imagesStruct): A pointer to a list of imagesStruct to which the image information will be appended.
+// If the URL is not a valid image or an error occurs during the process, the function returns without an image or an error.
 //
 // Example:
 //
-//	var images []imagesStruct
-//	url := "https://example.com/image.jpg"
-//	getImageSize(url, &images)
-//	// Now the images list contains information about the image fetched from the URL.
-func getImageSize(url string, images *[]imagesStruct) {
-	if !isURL(url) {
-		url = "https://" + url
-	}
-	body, err := getImageData(url)
-	if !isImage(body) {
-		return
-	}
-	if err != nil {
-		return
+//	img, err := getImage("https://example.com/image.jpg")
+//  if err != nil {
+//      // there was an error fetching the image
+//  } else if img == nil {
+//      // couldn't decode the image
+//  } else {
+//      // all good :)
+//  }
+func getImage(url string) (*imageData, error) {
+	body, ok, err := httpGet(url)
+	if err != nil || !ok || !isImage(body) {
+		return nil, err
 	}
 
 	// Check if the image is an ICO file
 	if isICOFile(body) {
+		// FIXME
 		width, height, data, err := getICOSize(body)
-
 		if err == nil {
-			size := [2]int{width, height}
+			size := size{width, height}
 			img := image.NewAlpha(image.Rect(0, 0, width, height))
 			for i := 0; i < len(data); i++ {
 				img.Pix[i] = data[i]
 			}
-			*images = append(*images, imagesStruct{src: url, size: size, data: img, Source: data})
-
+			return &imageData{src: url, size: size, img: img, data: body}, nil
 		}
-		return
+		return nil, nil
 	}
 
 	img, _, err := image.Decode(bytes.NewReader(body))
 	if err != nil {
-		return
+		return nil, nil
 	}
 
 	width := img.Bounds().Dx()
 	height := img.Bounds().Dy()
-
-	if err == nil {
-		size := [2]int{width, height}
-		*images = append(*images, imagesStruct{src: url, size: size, data: img, Source: body})
-	}
-
-	return
+	size := size{width, height}
+	return &imageData{src: url, size: size, img: img, data: body}, nil
 }
 
 // isICOFile checks whether the provided byte list `data` represents an ICO file.
@@ -94,52 +81,11 @@ func isICOFile(data []byte) bool {
 	return len(data) > 2 && data[0] == 0 && data[1] == 0x01
 }
 
-// isURL checks whether the provided string `str` is a valid URL.
-// It uses Go's url.Parse and checks if it returns any error to determine if the URL is valid.
-// If the URL is valid and contains both a scheme and a host, the function returns true; otherwise, it returns false.
+// isImage checks whether the provided `data` represents an image.
 //
-// Parameters:
-//
-//	str (string): The string to check if it is a valid URL.
-//
-// Returns:
-//
-//	(bool): True if the string is a valid URL, false otherwise.
-//
-// Example:
-//
-//	urlStr := "https://example.com"
-//	isValid := isURL(urlStr)
-//	if isValid {
-//	    fmt.Println("The URL is valid.")
-//	} else {
-//	    fmt.Println("The URL is not valid.")
-//	}
-func isURL(str string) bool {
-	_, err := url.ParseRequestURI(str)
-	if err != nil {
-		return false
-	}
-
-	u, err := url.Parse(str)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return false
-	}
-
-	return true
-}
-
-// isImage checks whether the provided byte list `data` represents an image.
 // It uses http.DetectContentType to identify the content type of the data and checks if it starts with the prefix "image/".
+//
 // If the data represents an image, the function returns true; otherwise, it returns false.
-//
-// Parameters:
-//
-//	data ([]byte): The byte list to check for an image content type.
-//
-// Returns:
-//
-//	(bool): True if the byte list represents an image, false otherwise.
 //
 // Example:
 //
@@ -151,12 +97,7 @@ func isURL(str string) bool {
 //	    fmt.Println("The data is not an image.")
 //	}
 func isImage(data []byte) bool {
-	contentType := http.DetectContentType(data)
-	if strings.HasPrefix(contentType, "image/") {
-		return true
-	}
-
-	return false
+	return strings.HasPrefix(http.DetectContentType(data), "image/")
 }
 
 // getICOSize extracts the size and alpha channel data of the first valid icon entry from the given ICO file data.
@@ -218,39 +159,48 @@ func getICOSize(data []byte) (int, int, []byte, error) {
 }
 
 // pickBestImage picks the image from the given list that best matches the target size.
-// It calculates the absolute difference between each image's width and the target size and selects the image
-// with the smallest difference as the best match.
 //
-// Parameters:
+// It chooses the smallest image taller than `targetHeight` or, if none exists, the largest image.
+// If there are no input images, or `squareOnly` is true and none are square, returns `nil`.
 //
-//	target (int): The target width that the best image should match.
-//	images ([]imagesStruct): A list of imagesStruct representing a collection of images with their sizes.
-//
-// Returns:
-//
-//	(imagesStruct): The best-matching image based on the target size.
-//
-// Example:
-//
-//	images := []imagesStruct{
-//	    {name: "image1.jpg", size: [2]int{1200, 800}},
-//	    {name: "image2.jpg", size: [2]int{1920, 1080}},
-//	    {name: "image3.jpg", size: [2]int{800, 600}},
+//	images := []imageData{
+//	    {name: "image1.jpg", size: size{1200, 800}},
+//	    {name: "image2.jpg", size: size{1920, 1080}},
+//	    {name: "image3.jpg", size: size{800, 600}},
 //	}
-//	targetSize := 1280
-//	bestImage := pickBestImage(targetSize, images)
-//	fmt.Println("Best image:", bestImage.name)
-func pickBestImage(target int, images []imagesStruct) imagesStruct {
-	bestImage := imagesStruct{}
-	minDiff := 999
+//	targetHeight := 700
+//	bestImage := pickBestImage(squareOnly, targetHeight, images)
+//  // bestImage.size.height == 800
+func pickBestImage(squareOnly bool, targetHeight int, images []imageData) *imageData {
+	// Track the largest image
+	var largestImage *imageData
+	// Track the smallest image larger than `targetHeight`
+	var smallestOkImage *imageData
 
-	for _, image := range images {
-		diff := int(math.Abs(float64(image.size[0]) - float64(target)))
-		if diff < minDiff {
-			minDiff = diff
-			bestImage = image
+	for idx := range images {
+		image := &images[idx]
+
+		// Maybe skip non-square images
+		if squareOnly && image.size.width != image.size.height {
+			continue
+		}
+
+		// Update `smallestOkImage`
+		diff := image.size.height - targetHeight
+		if diff >= 0 {
+			if smallestOkImage == nil || image.size.height < smallestOkImage.size.height {
+				smallestOkImage = image
+			}
+		}
+
+		// Update `largestImage`
+		if largestImage == nil || image.size.height > largestImage.size.height {
+			largestImage = image
 		}
 	}
 
-	return bestImage
+	if smallestOkImage != nil {
+		return smallestOkImage
+	}
+	return largestImage
 }
