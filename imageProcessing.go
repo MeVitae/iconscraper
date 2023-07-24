@@ -26,7 +26,7 @@ import (
 //
 // Example:
 //
-//		img, err := getImage("https://example.com/image.jpg")
+//	 img, err := getImage("https://example.com/image.jpg")
 //	 if err != nil {
 //	     // there was an error fetching the image
 //	 } else if img == nil {
@@ -34,15 +34,19 @@ import (
 //	 } else {
 //	     // all good :)
 //	 }
-func getImage(url string, domain *string, receiveCh chan imageData, errorChan chan error) (imageData, bool) {
-
+func (workers *imageWorkers) getImage(url string) {
 	if !isURL(url) {
 		url = "https://" + url
 	}
-	body, ok, err := httpGet(url)
-	if err != nil || !ok || !isImage(body) {
-		errorChan <- err
-		return imageData{}, false
+
+    httpResult := workers.http.get(url)
+	if httpResult.err != nil {
+		workers.errors <- httpResult.err
+        return
+	}
+    body := httpResult.body
+	if httpResult.status != 200 || !isImage(body) {
+        return
 	}
 
 	// Check if the image is an ICO file
@@ -54,21 +58,20 @@ func getImage(url string, domain *string, receiveCh chan imageData, errorChan ch
 		os.Remove(path + "tmpIco.png")
 		if err == nil {
 			size := size{width, height}
-			receiveCh <- imageData{domain: *domain, src: url, size: size, data: body}
-
+			workers.resultChan <- imageData{domain: workers.domain, src: url, size: size, data: body}
 		}
-		return imageData{}, false
+        return
 	}
+
 	img, _, err := image.Decode(bytes.NewReader(body))
 	if err != nil {
-		errorChan <- err
-		return imageData{}, false
+        // TODO: maybe add warnings
+        return
 	}
 	width := img.Bounds().Dx()
 	height := img.Bounds().Dy()
 	size := size{width, height}
-	receiveCh <- imageData{domain: *domain, src: url, size: size, img: img, data: body}
-	return imageData{src: url, size: size, img: img, data: body}, true
+	workers.resultChan <- imageData{domain: workers.domain, src: url, size: size, img: img, data: body}
 }
 
 func encodeImageAsPNG(imagePath string) ([]byte, error) {

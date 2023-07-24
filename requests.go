@@ -10,6 +10,12 @@ import (
 
 var UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.6.1 Safari/605.1.15"
 
+type httpResult struct {
+	status int
+	body   []byte
+	err    error
+}
+
 // httpGet sends an HTTP GET request to the specified URL and returns the response body as bytes along with a boolean indicating if the response was a 200.
 //
 // It sets a custom User-Agent header in the request to avoid being blocked by some servers.
@@ -30,7 +36,7 @@ var UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605
 //	} else {
 //	    // Process the data (e.g., save it to a file or send it as a response).
 //	}
-func httpGet(url string) ([]byte, bool, error) {
+func httpGet(url string) httpResult {
 	if !isURL(url) {
 		url = "https://" + url
 	}
@@ -43,7 +49,7 @@ func httpGet(url string) ([]byte, bool, error) {
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, false, fmt.Errorf("Failed to create request: %w", err)
+		return httpResult{0, nil, fmt.Errorf("Failed to create request: %w", err)}
 	}
 	req.Header.Set("User-Agent", UserAgent)
 
@@ -66,9 +72,9 @@ func httpGet(url string) ([]byte, bool, error) {
 		break
 	}
 	if err != nil {
-		return nil, false, err
+		return httpResult{0, nil, err}
 	}
-	return body, resp.StatusCode == 200, nil
+	return httpResult{resp.StatusCode, body, nil}
 }
 
 // isURL checks whether the provided string `str` is a valid URL.

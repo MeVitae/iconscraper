@@ -13,7 +13,7 @@ type processReturn struct {
 	// domain is simply the domain that was processed.
 	domain string
 
-	// result holds the acctual result of the worker, it holds the URL,Image and Source.
+	// result holds the acctual result of the worker, it holds the URL, Image and Source.
 	result Icon
 }
 
@@ -22,9 +22,7 @@ type Icon struct {
 	// URL is the source location from which the data was fetched or derived.
 	URL string
 
-	// Image holds the image data returned as a result.
-	//
-	// It implements the image.Image interface, enabling various image operations.
+	// Image holds the parsed image, or nil if the image wasn't parsed (currently the case for ico files).
 	Image image.Image
 
 	// Source is the image source as downloaded.
@@ -48,7 +46,7 @@ type SafeCounter struct {
 	mu    sync.Mutex
 	count int
 }
-// asd
+
 // GetIcons scrapes icons from the provided domains concurrently and returns the results as a map from domain to the best image based on the given target.
 //
 // It fetches images from the given domains using multiple worker goroutines.
@@ -56,76 +54,104 @@ type SafeCounter struct {
 // Parameters:
 //   - domains: The domains from which icons are to be scraped.
 //   - squareOnly: If true, only square icons are considered.
-//   - targetHeight: An integer representing the target height of the images to be fetched (height).
+//   - targetHeight: An integer representing the target height of the images to be fetched.
 //   - maxConcurrentProcesses: An integer defining the maximum number of concurrent worker goroutines to be used.
-//     The function will limit the number of workers to this value if it exceeds the length of domains.
-func GetIcons(domains []string, squareOnly bool, targetHeight, maxConcurrentProcesses int) {
-	var ProcessingImagesWG sync.WaitGroup
-	var WebProcessingWG sync.WaitGroup
-	AllLinksSent := false
-	WorkersWaiting := SafeCounter{}
-	channels := map[string]channelHandling{}
-	imageSendingCh := make(chan imageData, 32000)
+func GetIcons(domains []string, squareOnly bool, targetHeight, maxConcurrentProcesses int) map[string]Icon {
+	// Channel to collect errors
 	errors := make(chan error, 32000)
-	imageReceivingCh := make(chan imageData, 32000)
+	defer close(errors)
+	go logErrors(errors)
+
+	// HTTP worker pool
+	http := newHttpWorkerPool(maxConcurrentProcesses)
+	defer http.close()
+
+	// Channel to collect results
+	results := make(chan processReturn)
+	defer close(results)
+
+	// Spawn a goroutine for every domain, these will be rate limited by the http pool.
 	for _, domain := range domains {
-		channels[domain] = channelHandling{urlChan: make(chan string, 32000), imageCh: make(chan imageData, 32000), imgDoneCh: make(chan imageData, 32000)}
-		go processDomain(domain, channels[domain], errors, &WebProcessingWG, imageReceivingCh)
+		go processDomain(domain, squareOnly, targetHeight, http, errors, results)
 	}
 
-	for i := 0; i < maxConcurrentProcesses; i++ {
-		go worker(&imageSendingCh, &imageReceivingCh, errors, &ProcessingImagesWG, &AllLinksSent, &WorkersWaiting)
+	// Collect results
+	resultMap := make(map[string]Icon, len(domains))
+	for idx := 0; idx < len(domains); idx++ {
+		res := <-results
+		resultMap[res.domain] = res.result
 	}
-	WebProcessingWG.Wait()
-	AllLinksSent = true
-	ProcessingImagesWG.Wait()
-	close(imageSendingCh)
-	for img := range imageSendingCh {
-		fmt.Println(img.src)
-	}
+	return resultMap
 }
 
-func GetIcon(domain string, squareOnly bool, targetHeight, maxConcurrentProcesses int) {
-	var wg sync.WaitGroup
-	var wg2 sync.WaitGroup
-	AllLinksSent := false
-	WorkersWaiting := SafeCounter{}
-	imageSendingCh := make(chan imageData, 32000)
+func GetIcon(domain string, squareOnly bool, targetHeight, maxConcurrentProcesses int) Icon {
+	// Channel to collect errors
 	errors := make(chan error, 32000)
-	imageReceivingCh := make(chan imageData, 32000)
+	defer close(errors)
+	go logErrors(errors)
 
-	channels := channelHandling{urlChan: make(chan string, 32000), imageCh: make(chan imageData, 32000), imgDoneCh: make(chan imageData, 32000)}
-	go processDomain(domain, channels, errors, &wg2, imageReceivingCh)
+	// HTTP worker pool
+	http := newHttpWorkerPool(maxConcurrentProcesses)
+	defer http.close()
 
-	for i := 0; i < maxConcurrentProcesses; i++ {
-		go worker(&imageSendingCh, &imageReceivingCh, errors, &wg, &AllLinksSent, &WorkersWaiting)
+	// Channel to collect results
+	results := make(chan processReturn, 1)
+	defer close(results)
+
+	processDomain(domain, squareOnly, targetHeight, http, errors, results)
+	return (<-results).result
+}
+
+// httpJob represents a GET request, where the results should be sent down the result channel.
+type httpJob struct {
+	url    string
+	result chan httpResult
+}
+
+// httpWorkerPool manages a fixed size pool of workers to perform HTTP requests.
+type httpWorkerPool struct {
+	// jobs is the channel to send jobs to be completed
+	//
+	// Results are returned down the channel specified in the job
+	jobs chan httpJob
+
+	// wg for the spawned workers
+	wg sync.WaitGroup
+}
+
+func newHttpWorkerPool(workers int) *httpWorkerPool {
+	jobs := make(chan httpJob)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	pool := &httpWorkerPool{
+		jobs: jobs,
+		wg:   wg,
 	}
-	wg2.Wait()
-	AllLinksSent = true
-	wg.Wait()
-	close(imageSendingCh)
-	for img := range imageSendingCh {
-		fmt.Println(img.src)
+	for i := 0; i < workers; i++ {
+		go pool.worker()
+	}
+	return pool
+}
+
+func (pool *httpWorkerPool) worker() {
+	defer pool.wg.Done()
+	for job := range pool.jobs {
+		job.result <- httpGet(job.url)
 	}
 }
 
-func worker(sendCh, receiveCh *chan imageData, errors chan error, wg *sync.WaitGroup, AllLinksSent *bool, WorkersWaiting *SafeCounter) {
-	wg.Add(1)
-	for receive := range *receiveCh {
-		WorkersWaiting.mu.Lock()
-		WorkersWaiting.count--
-		WorkersWaiting.mu.Unlock()
-		getImage(receive.src, &receive.domain, *sendCh, errors)
-		WorkersWaiting.mu.Lock()
-		WorkersWaiting.count++
-		if WorkersWaiting.count == 0 && *AllLinksSent {
-			close(*receiveCh)
-			WorkersWaiting.mu.Unlock()
-			break
-		}
-		WorkersWaiting.mu.Unlock()
+func (pool *httpWorkerPool) get(url string) httpResult {
+	httpResultChan := make(chan httpResult)
+	pool.jobs <- httpJob{
+		url:    url,
+		result: httpResultChan,
 	}
-	defer wg.Done()
+	return <-httpResultChan
+}
+
+func (pool *httpWorkerPool) close() {
+	close(pool.jobs)
+	pool.wg.Wait()
 }
 
 // GetIcon scrapes icons from the provided domain and returns the smallest icon taller than the target height, or the largest icon if none are taller).

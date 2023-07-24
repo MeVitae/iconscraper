@@ -7,7 +7,6 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"strings"
-	"sync"
 
 	"golang.org/x/net/html"
 )
@@ -105,43 +104,87 @@ var attrValues = []string{"icon", "image_src", "apple-touch-icon", "shortcut ico
 //	    result := <-rez
 //	    // Process the result (e.g., save it to a file or display it).
 //	}
-
-//var test= []string{"asd"}
-
-func processDomain(url string, myChannels channelHandling, errors chan error, wg *sync.WaitGroup, imgDataChan chan imageData) {
-	wg.Add(1)
-	htmlContent, _, err := httpGet(url)
-	if err != nil {
-		errors <- fmt.Errorf("Error fetching page for %s: %w", url, err)
+func processDomain(
+	domain string,
+	squareOnly bool,
+	targetHeight int,
+	http *httpWorkerPool,
+	errors chan error,
+	result chan processReturn,
+) {
+	httpResult := http.get(domain)
+	if httpResult.err != nil {
+		errors <- httpResult.err
+		return
 	}
-	doc, err := html.Parse(strings.NewReader(string(htmlContent)))
+
+	doc, err := html.Parse(strings.NewReader(string(httpResult.body)))
 	if err != nil {
-		errors <- fmt.Errorf("Error parsing HTML from %s: %w", url, err)
+		errors <- fmt.Errorf("Error parsing HTML from %s: %w", domain, err)
+		return
 	}
-	imgDataChan <- imageData{domain: url, src: url + "/favicon.ico"}
-	getImages(doc, url, imgDataChan)
-	defer wg.Done()
+
+	workers := newImageWorkers(domain, http, errors)
+	// Always check for `/favicon.ico`, it's not always linked from the HTML.
+	workers.spawn(domain + "/favicon.ico")
+	// Spawn workers scraping all the linked icons
+	getImages(doc, domain, &workers)
+
+	// Pick the best size image from all the results
+	best := pickBestImage(squareOnly, targetHeight, workers.results())
+	result <- processReturn{
+		domain: domain,
+		result: Icon{
+			URL:    best.src,
+			Image:  best.img,
+			Source: best.data,
+		},
+	}
 }
 
-// getImages finds all images based on keys and values variables in the provided HTML node (n).
-//
-// Parameters:
-func smth() {
+type imageWorkers struct {
+	domain     string
+	resultChan chan imageData
+	numImages  int
+	http       *httpWorkerPool
+	errors     chan error
+}
 
+func newImageWorkers(domain string, http *httpWorkerPool, errors chan error) imageWorkers {
+	return imageWorkers{
+		domain:     domain,
+		resultChan: make(chan imageData),
+		http:       http,
+		errors:     errors,
+	}
+}
+
+func (workers *imageWorkers) spawn(url string) {
+	workers.numImages += 1
+	go workers.getImage(url)
+}
+
+func (workers *imageWorkers) results() []imageData {
+	results := make([]imageData, workers.numImages, workers.numImages)
+	for idx := range results {
+		results[idx] = <-workers.resultChan
+	}
+	close(workers.resultChan)
+	return results
 }
 
 // - n: The HTML node to search for image-related attributes.
 // - url: The base URL to resolve relative image URLs.
-func getImages(n *html.Node, url string, imgDataChan chan imageData) {
+func getImages(n *html.Node, url string, workers *imageWorkers) {
 	if n.Type == html.ElementNode && n.Data == "head" {
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			if c.Type == html.ElementNode && (c.Data == "link" || c.Data == "meta") {
 				for _, a := range c.Attr {
 					if contains(attrKeys, a.Key) || contains(attrValues, a.Val) {
 						if isURL(a.Val) {
-							imgDataChan <- imageData{domain: url, src: a.Val}
+							workers.spawn(a.Val)
 						} else {
-							imgDataChan <- imageData{domain: url, src: url + "/" + a.Val}
+							workers.spawn(url + "/" + a.Val)
 						}
 					}
 				}
@@ -149,7 +192,7 @@ func getImages(n *html.Node, url string, imgDataChan chan imageData) {
 		}
 	} else {
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			getImages(c, url, imgDataChan)
+			getImages(c, url, workers)
 		}
 	}
 }
