@@ -49,24 +49,25 @@ func httpGet(url string) ([]byte, bool, error) {
 
 	var resp *http.Response
 	var body []byte
-	for attempt := 0; attempt < 8; attempt++ {
+	for attempt := 0; attempt < 6; attempt++ {
+		time.Sleep(500 * time.Duration(attempt) * time.Millisecond)
 		resp, err = client.Do(req)
 		if err != nil {
 			err = fmt.Errorf("Failed to send GET request: %w", err)
-			continue
+			break
 		}
-		time.Sleep(500 * (time.Duration(attempt) + 500) * time.Millisecond)
 		defer resp.Body.Close()
 		body, err = ioutil.ReadAll(resp.Body)
 		if err != nil {
 			err = fmt.Errorf("Failed to read response body: %w", err)
-			continue
+			break
 		}
+
+		break
 	}
 	if err != nil {
 		return nil, false, err
 	}
-
 	return body, resp.StatusCode == 200, nil
 }
 

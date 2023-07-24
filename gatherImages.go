@@ -1,9 +1,11 @@
 package scraper
 
 import (
-	"encoding/json"
 	"fmt"
 	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"strings"
 	"sync"
 
@@ -46,6 +48,8 @@ type app struct {
 //	data (image.Image): The decoded image data represented as an image.Image type.
 //	Source ([]byte): The raw image data as a byte list.
 type imageData struct {
+	// the domain owning the image
+	domain string
 	// src url of the image
 	src string
 	// size of the image
@@ -101,108 +105,53 @@ var attrValues = []string{"icon", "image_src", "apple-touch-icon", "shortcut ico
 //	    result := <-rez
 //	    // Process the result (e.g., save it to a file or display it).
 //	}
-func processImageGetting(
-	urls chan string,
-	squareOnly bool,
-	targetHeight int,
-	rez chan processReturn,
-	errors chan error,
-	wg *sync.WaitGroup,
-) {
-	for url := range urls {
-		res, err := processDomain(url, squareOnly, targetHeight, errors)
-		if err != nil {
-			errors <- err
-		}
-		if res != nil {
-			rez <- *res
-		}
-		wg.Done()
-	}
-}
 
-func processDomain(url string, squareOnly bool, targetHeight int, errors chan error) (*processReturn, error) {
+//var test= []string{"asd"}
+
+func processDomain(url string, myChannels channelHandling, errors chan error, wg *sync.WaitGroup, imgDataChan chan imageData) {
+	wg.Add(1)
 	htmlContent, _, err := httpGet(url)
 	if err != nil {
-		return nil, fmt.Errorf("Error fetching page for %s: %w", url, err)
+		errors <- fmt.Errorf("Error fetching page for %s: %w", url, err)
 	}
 	doc, err := html.Parse(strings.NewReader(string(htmlContent)))
 	if err != nil {
-		return nil, fmt.Errorf("Error parsing HTML from %s: %w", url, err)
+		errors <- fmt.Errorf("Error parsing HTML from %s: %w", url, err)
 	}
-
-	images, manifest, err := getImages(doc, url)
-	if err != nil {
-		return nil, fmt.Errorf("Error getting images from %s: %w", url, err)
-	}
-
-	// If a manifest is found get the manifest data and pick the best image from there based on the target given.
-	if manifest != "" {
-		jsonData, ok, err := httpGet(url + manifest)
-		if ok {
-			var app app
-			err = json.Unmarshal(jsonData, &app)
-			if err != nil {
-				errors <- fmt.Errorf("Error parsing manifest: %s", manifest)
-			} else {
-				// Look through all icons given within the manifest.
-				for _, icon := range app.Icons {
-					imgData, err := getImage(url + icon.Src)
-					if imgData != nil {
-						images = append(images, *imgData)
-					}
-					if err != nil {
-						return nil, fmt.Errorf("Error fetching image from manifest %s: %w", icon.Src, err)
-					}
-				}
-			}
-		}
-	}
-
-	// Get the best image from all images found and push it back the channel
-	bestImage := pickBestImage(squareOnly, targetHeight, images)
-    if bestImage == nil {
-        return nil, nil
-    }
-	result := Icon{URL: bestImage.src, Image: bestImage.img, Source: bestImage.data}
-	return &processReturn{domain: url, result: result}, nil
+	imgDataChan <- imageData{domain: url, src: url + "/favicon.ico"}
+	getImages(doc, url, imgDataChan)
+	defer wg.Done()
 }
 
 // getImages finds all images based on keys and values variables in the provided HTML node (n).
 //
 // Parameters:
-//
-//	- n: The HTML node to search for image-related attributes.
-//	- url: The base URL to resolve relative image URLs.
-func getImages(n *html.Node, url string) (images []imageData, manifestPath string, err error) {
-	if n.Type == html.ElementNode && (n.Data == "link" || n.Data == "meta") {
-		for _, attr := range n.Attr {
-			if attr.Key == "rel" && attr.Val == "manifest" {
-				manifestPath = attr.Val
-			} else if contains(attrKeys, attr.Key) || contains(attrValues, attr.Val) {
-				imgUrl := attr.Val
-				if !isURL(attr.Val) {
-					imgUrl = url + imgUrl
-				}
-				var img *imageData
-				img, err = getImage(imgUrl)
-				if img != nil {
-					images = append(images, *img)
-				}
-				if err != nil {
-					return
+func smth() {
+
+}
+
+// - n: The HTML node to search for image-related attributes.
+// - url: The base URL to resolve relative image URLs.
+func getImages(n *html.Node, url string, imgDataChan chan imageData) {
+	if n.Type == html.ElementNode && n.Data == "head" {
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			if c.Type == html.ElementNode && (c.Data == "link" || c.Data == "meta") {
+				for _, a := range c.Attr {
+					if contains(attrKeys, a.Key) || contains(attrValues, a.Val) {
+						if isURL(a.Val) {
+							imgDataChan <- imageData{domain: url, src: a.Val}
+						} else {
+							imgDataChan <- imageData{domain: url, src: url + "/" + a.Val}
+						}
+					}
 				}
 			}
 		}
+	} else {
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			getImages(c, url, imgDataChan)
+		}
 	}
-
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		var childImages []imageData
-		childImages, manifestPath, err = getImages(c, url)
-		images = append(images, childImages...)
-	}
-
-	return
 }
 
 // contains checks if the target string is present in the provided list of strings.
@@ -210,14 +159,15 @@ func getImages(n *html.Node, url string) (images []imageData, manifestPath strin
 // It returns true if the target is found, otherwise, it returns false.
 //
 // Example:
-//   list := []string{"apple", "banana", "orange"}
-//   target := "banana"
-//   found := contains(list, target)
-//   if found {
-//       fmt.Println("The target is present in the list.")
-//   } else {
-//       fmt.Println("The target is not present in the list.")
-//   }
+//
+//	list := []string{"apple", "banana", "orange"}
+//	target := "banana"
+//	found := contains(list, target)
+//	if found {
+//	    fmt.Println("The target is present in the list.")
+//	} else {
+//	    fmt.Println("The target is not present in the list.")
+//	}
 func contains(list []string, target string) bool {
 	for _, item := range list {
 		if item == target {

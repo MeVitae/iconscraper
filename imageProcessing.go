@@ -4,8 +4,18 @@ import (
 	"bytes"
 	"fmt"
 	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	"image/png"
+	_ "image/png"
+	"io/ioutil"
+	"math/rand"
 	"net/http"
+	"os"
 	"strings"
+	"time"
+
+	"github.com/mat/besticon/ico"
 )
 
 // getImage fetches the image data from the specified URL, decodes it, and returns information about the image.
@@ -16,44 +26,108 @@ import (
 //
 // Example:
 //
-//	img, err := getImage("https://example.com/image.jpg")
-//  if err != nil {
-//      // there was an error fetching the image
-//  } else if img == nil {
-//      // couldn't decode the image
-//  } else {
-//      // all good :)
-//  }
-func getImage(url string) (*imageData, error) {
+//		img, err := getImage("https://example.com/image.jpg")
+//	 if err != nil {
+//	     // there was an error fetching the image
+//	 } else if img == nil {
+//	     // couldn't decode the image
+//	 } else {
+//	     // all good :)
+//	 }
+func getImage(url string, domain *string, receiveCh chan imageData, errorChan chan error) (imageData, bool) {
+
+	if !isURL(url) {
+		url = "https://" + url
+	}
 	body, ok, err := httpGet(url)
 	if err != nil || !ok || !isImage(body) {
-		return nil, err
+		errorChan <- err
+		return imageData{}, false
 	}
 
 	// Check if the image is an ICO file
 	if isICOFile(body) {
 		// FIXME
-		width, height, data, err := getICOSize(body)
+		path := GenerateRandomString(10)
+		saveImageToFile(body, path+"tmpIco.png")
+		width, height, err := getImageInfo(path + "tmpIco.png")
+		os.Remove(path + "tmpIco.png")
 		if err == nil {
 			size := size{width, height}
-			img := image.NewAlpha(image.Rect(0, 0, width, height))
-			for i := 0; i < len(data); i++ {
-				img.Pix[i] = data[i]
-			}
-			return &imageData{src: url, size: size, img: img, data: body}, nil
-		}
-		return nil, nil
-	}
+			receiveCh <- imageData{domain: *domain, src: url, size: size, data: body}
 
+		}
+		return imageData{}, false
+	}
 	img, _, err := image.Decode(bytes.NewReader(body))
 	if err != nil {
-		return nil, nil
+		errorChan <- err
+		return imageData{}, false
 	}
-
 	width := img.Bounds().Dx()
 	height := img.Bounds().Dy()
 	size := size{width, height}
-	return &imageData{src: url, size: size, img: img, data: body}, nil
+	receiveCh <- imageData{domain: *domain, src: url, size: size, img: img, data: body}
+	return imageData{src: url, size: size, img: img, data: body}, true
+}
+
+func encodeImageAsPNG(imagePath string) ([]byte, error) {
+	// Read the ICO file data from file
+	file, err := os.Open(imagePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	// Decode the ICO file
+	icoImage, err := ico.Decode(file)
+	if err != nil {
+		return nil, err
+	}
+
+	img := icoImage
+
+	// Encode the image as PNG and get it as bytes
+	var buf bytes.Buffer
+	err = png.Encode(&buf, img)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+func saveImageToPNGBytes(img image.Image) ([]byte, error) {
+	var buf bytes.Buffer
+	err := png.Encode(&buf, img)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+func getImageInfo(filePath string) (width, height int, err error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer file.Close()
+
+	img, _, err := image.DecodeConfig(file)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return img.Width, img.Height, nil
+}
+func saveImageToFile(imageData []byte, filename string) error {
+	// Write the image data to the file
+	err := ioutil.WriteFile(filename, imageData, 0644)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // isICOFile checks whether the provided byte list `data` represents an ICO file.
@@ -78,7 +152,12 @@ func getImage(url string) (*imageData, error) {
 //	    fmt.Println("The data is not an ICO file.")
 //	}
 func isICOFile(data []byte) bool {
-	return len(data) > 2 && data[0] == 0 && data[1] == 0x01
+	if len(data) < 4 {
+		return false
+	}
+
+	// Check the magic number for ICO files (0x00 0x00 0x01 0x00)
+	return data[0] == 0x00 && data[1] == 0x00 && data[2] == 0x01 && data[3] == 0x00
 }
 
 // isImage checks whether the provided `data` represents an image.
@@ -163,14 +242,14 @@ func getICOSize(data []byte) (int, int, []byte, error) {
 // It chooses the smallest image taller than `targetHeight` or, if none exists, the largest image.
 // If there are no input images, or `squareOnly` is true and none are square, returns `nil`.
 //
-//	images := []imageData{
-//	    {name: "image1.jpg", size: size{1200, 800}},
-//	    {name: "image2.jpg", size: size{1920, 1080}},
-//	    {name: "image3.jpg", size: size{800, 600}},
-//	}
-//	targetHeight := 700
-//	bestImage := pickBestImage(squareOnly, targetHeight, images)
-//  // bestImage.size.height == 800
+//		images := []imageData{
+//		    {name: "image1.jpg", size: size{1200, 800}},
+//		    {name: "image2.jpg", size: size{1920, 1080}},
+//		    {name: "image3.jpg", size: size{800, 600}},
+//		}
+//		targetHeight := 700
+//		bestImage := pickBestImage(squareOnly, targetHeight, images)
+//	 // bestImage.size.height == 800
 func pickBestImage(squareOnly bool, targetHeight int, images []imageData) *imageData {
 	// Track the largest image
 	var largestImage *imageData
@@ -179,7 +258,6 @@ func pickBestImage(squareOnly bool, targetHeight int, images []imageData) *image
 
 	for idx := range images {
 		image := &images[idx]
-
 		// Maybe skip non-square images
 		if squareOnly && image.size.width != image.size.height {
 			continue
@@ -203,4 +281,16 @@ func pickBestImage(squareOnly bool, targetHeight int, images []imageData) *image
 		return smallestOkImage
 	}
 	return largestImage
+}
+
+func GenerateRandomString(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[seededRand.Intn(len(charset))]
+	}
+
+	return string(b)
 }

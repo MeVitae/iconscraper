@@ -1,4 +1,4 @@
-// Package yourpackage provides functionalities for scraping and processing images from domains and returns the best one based on its size and your target size.
+// Package scraper provides functionalities for scraping and processing images from domains and returns the best one based on its size and your target size.
 package scraper
 
 import (
@@ -38,6 +38,17 @@ func logErrors(errors chan error) {
 	}
 }
 
+type channelHandling struct {
+	urlChan   chan string
+	imageCh   chan imageData
+	imgDoneCh chan imageData
+}
+
+type SafeCounter struct {
+	mu    sync.Mutex
+	count int
+}
+// asd
 // GetIcons scrapes icons from the provided domains concurrently and returns the results as a map from domain to the best image based on the given target.
 //
 // It fetches images from the given domains using multiple worker goroutines.
@@ -48,59 +59,77 @@ func logErrors(errors chan error) {
 //   - targetHeight: An integer representing the target height of the images to be fetched (height).
 //   - maxConcurrentProcesses: An integer defining the maximum number of concurrent worker goroutines to be used.
 //     The function will limit the number of workers to this value if it exceeds the length of domains.
-func GetIcons(domains []string, squareOnly bool, targetHeight, maxConcurrentProcesses int) map[string]Icon {
-	// Fill the urls channel (it cannot become full because we gave it the correct capacity)
-	urls := make(chan string, len(domains))
+func GetIcons(domains []string, squareOnly bool, targetHeight, maxConcurrentProcesses int) {
+	var ProcessingImagesWG sync.WaitGroup
+	var WebProcessingWG sync.WaitGroup
+	AllLinksSent := false
+	WorkersWaiting := SafeCounter{}
+	channels := map[string]channelHandling{}
+	imageSendingCh := make(chan imageData, 32000)
+	errors := make(chan error, 32000)
+	imageReceivingCh := make(chan imageData, 32000)
 	for _, domain := range domains {
-		urls <- domain
-	}
-	// Create a wait group that waits for all the domains to be completed
-	wg := sync.WaitGroup{}
-	wg.Add(len(domains))
-
-	// Create a channel for sending errors to
-	errors := make(chan error)
-	go logErrors(errors)
-	// Create a channel to send results to
-	returns := make(chan processReturn)
-
-	// Calculate the number of workers required
-	workers := len(domains)
-	if workers > maxConcurrentProcesses {
-		workers = maxConcurrentProcesses
+		channels[domain] = channelHandling{urlChan: make(chan string, 32000), imageCh: make(chan imageData, 32000), imgDoneCh: make(chan imageData, 32000)}
+		go processDomain(domain, channels[domain], errors, &WebProcessingWG, imageReceivingCh)
 	}
 
-	for worker := 0; worker < workers; worker++ {
-		go processImageGetting(urls, squareOnly, targetHeight, returns, errors, &wg)
+	for i := 0; i < maxConcurrentProcesses; i++ {
+		go worker(&imageSendingCh, &imageReceivingCh, errors, &ProcessingImagesWG, &AllLinksSent, &WorkersWaiting)
 	}
+	WebProcessingWG.Wait()
+	AllLinksSent = true
+	ProcessingImagesWG.Wait()
+	close(imageSendingCh)
+	for img := range imageSendingCh {
+		fmt.Println(img.src)
+	}
+}
 
-	results := make(map[string]Icon, len(domains))
-	for domainResult := range returns {
-		results[domainResult.domain] = domainResult.result
-		if len(results) == len(domains) {
+func GetIcon(domain string, squareOnly bool, targetHeight, maxConcurrentProcesses int) {
+	var wg sync.WaitGroup
+	var wg2 sync.WaitGroup
+	AllLinksSent := false
+	WorkersWaiting := SafeCounter{}
+	imageSendingCh := make(chan imageData, 32000)
+	errors := make(chan error, 32000)
+	imageReceivingCh := make(chan imageData, 32000)
+
+	channels := channelHandling{urlChan: make(chan string, 32000), imageCh: make(chan imageData, 32000), imgDoneCh: make(chan imageData, 32000)}
+	go processDomain(domain, channels, errors, &wg2, imageReceivingCh)
+
+	for i := 0; i < maxConcurrentProcesses; i++ {
+		go worker(&imageSendingCh, &imageReceivingCh, errors, &wg, &AllLinksSent, &WorkersWaiting)
+	}
+	wg2.Wait()
+	AllLinksSent = true
+	wg.Wait()
+	close(imageSendingCh)
+	for img := range imageSendingCh {
+		fmt.Println(img.src)
+	}
+}
+
+func worker(sendCh, receiveCh *chan imageData, errors chan error, wg *sync.WaitGroup, AllLinksSent *bool, WorkersWaiting *SafeCounter) {
+	wg.Add(1)
+	for receive := range *receiveCh {
+		WorkersWaiting.mu.Lock()
+		WorkersWaiting.count--
+		WorkersWaiting.mu.Unlock()
+		getImage(receive.src, &receive.domain, *sendCh, errors)
+		WorkersWaiting.mu.Lock()
+		WorkersWaiting.count++
+		if WorkersWaiting.count == 0 && *AllLinksSent {
+			close(*receiveCh)
+			WorkersWaiting.mu.Unlock()
 			break
 		}
+		WorkersWaiting.mu.Unlock()
 	}
-	close(urls)
-	wg.Wait()
-
-	return results
+	defer wg.Done()
 }
 
 // GetIcon scrapes icons from the provided domain and returns the smallest icon taller than the target height, or the largest icon if none are taller).
-//
-// Parameters:
+// Parameters
 //   - domains: The domains from which icons are to be scraped.
 //   - squareOnly: If true, only square icons are considered.
 //   - targetHeight: An integer representing the target height of the images to be fetched (height).
-func GetIcon(domain string, squareOnly bool, targetHeight int) (*Icon, error) {
-	// Create a channel for sending errors to
-	errors := make(chan error)
-	go logErrors(errors)
-
-	res, err := processDomain(domain, squareOnly, targetHeight, errors)
-	if res == nil {
-		return nil, err
-	}
-	return &res.result, err
-}
