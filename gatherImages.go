@@ -143,19 +143,21 @@ func processDomain(
 }
 
 type imageWorkers struct {
-	domain     string
-	resultChan chan imageData
-	numImages  int
-	http       *httpWorkerPool
-	errors     chan error
+	domain      string
+	resultChan  chan imageData
+	failureChan chan struct{}
+	numImages   int
+	http        *httpWorkerPool
+	errors      chan error
 }
 
 func newImageWorkers(domain string, http *httpWorkerPool, errors chan error) imageWorkers {
 	return imageWorkers{
-		domain:     domain,
-		resultChan: make(chan imageData),
-		http:       http,
-		errors:     errors,
+		domain:      domain,
+		resultChan:  make(chan imageData),
+		failureChan: make(chan struct{}),
+		http:        http,
+		errors:      errors,
 	}
 }
 
@@ -165,9 +167,13 @@ func (workers *imageWorkers) spawn(url string) {
 }
 
 func (workers *imageWorkers) results() []imageData {
-	results := make([]imageData, workers.numImages, workers.numImages)
-	for idx := range results {
-		results[idx] = <-workers.resultChan
+	results := make([]imageData, 0, workers.numImages)
+	for idx := 0; idx < workers.numImages; idx++ {
+		select {
+		case result := <-workers.resultChan:
+			results = append(results, result)
+		case _ = <-workers.failureChan:
+		}
 	}
 	close(workers.resultChan)
 	return results

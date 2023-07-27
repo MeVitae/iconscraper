@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -13,6 +14,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	_ "github.com/mat/besticon/ico"
 )
 
 // getImage fetches the image data from the specified URL, decodes it, and returns information about the image.
@@ -39,10 +42,12 @@ func (workers *imageWorkers) getImage(url string) {
 	httpResult := workers.http.get(url)
 	if httpResult.err != nil {
 		workers.errors <- httpResult.err
+		workers.failureChan <- struct{}{}
 		return
 	}
 	body := httpResult.body
 	if httpResult.status != 200 || !isImage(body) {
+		workers.failureChan <- struct{}{}
 		return
 	}
 
@@ -53,16 +58,21 @@ func (workers *imageWorkers) getImage(url string) {
 		saveImageToFile(body, path+"tmpIco.png")
 		width, height, err := getImageInfo(path + "tmpIco.png")
 		os.Remove(path + "tmpIco.png")
-		if err == nil {
-			size := size{width, height}
-			workers.resultChan <- imageData{domain: workers.domain, src: url, size: size, data: body}
+		if err != nil {
+			workers.errors <- fmt.Errorf("failed to get ico dimensions of %s: %w", url, err)
+			workers.failureChan <- struct{}{}
+			return
 		}
+		size := size{width, height}
+		workers.resultChan <- imageData{domain: workers.domain, src: url, size: size, data: body}
 		return
 	}
 
 	img, _, err := image.Decode(bytes.NewReader(body))
 	if err != nil {
-		// TODO: maybe add warnings
+		// TODO: maybe these should be warnings not errors
+		workers.errors <- fmt.Errorf("failed to decode image %s: %w", url, err)
+		workers.failureChan <- struct{}{}
 		return
 	}
 	width := img.Bounds().Dx()
