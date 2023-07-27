@@ -84,6 +84,16 @@ func GetIcons(domains []string, squareOnly bool, targetHeight, maxConcurrentProc
 	return resultMap
 }
 
+// GetIcon scrapes icons from the provided domain concurrently and returns the results as a map from domain to the best image based on the given target.
+//
+// It fetches images from the given domains using multiple worker goroutines.
+//
+// Parameters:
+//   - domain: The domain from which icons are to be scraped.
+//   - squareOnly: If true, only square icons are considered.
+//   - targetHeight: An integer representing the target height of the images to be fetched.
+//   - maxConcurrentProcesses: An integer defining the maximum number of concurrent worker goroutines to be used
+//   - maxConcurrentProcesses:(this should be set from based on the network speed of the machine you are running it on).
 func GetIcon(domain string, squareOnly bool, targetHeight, maxConcurrentProcesses int) Icon {
 	// Channel to collect errors
 	errors := make(chan error, 32000)
@@ -153,9 +163,3 @@ func (pool *httpWorkerPool) close() {
 	close(pool.jobs)
 	pool.wg.Wait()
 }
-
-// GetIcon scrapes icons from the provided domain and returns the smallest icon taller than the target height, or the largest icon if none are taller).
-// Parameters
-//   - domains: The domains from which icons are to be scraped.
-//   - squareOnly: If true, only square icons are considered.
-//   - targetHeight: An integer representing the target height of the images to be fetched (height).

@@ -2,7 +2,6 @@ package scraper
 
 import (
 	"bytes"
-	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -14,8 +13,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/mat/besticon/ico"
 )
 
 // getImage fetches the image data from the specified URL, decodes it, and returns information about the image.
@@ -26,27 +23,27 @@ import (
 //
 // Example:
 //
-//	 img, err := getImage("https://example.com/image.jpg")
-//	 if err != nil {
-//	     // there was an error fetching the image
-//	 } else if img == nil {
-//	     // couldn't decode the image
-//	 } else {
-//	     // all good :)
-//	 }
+//	img, err := getImage("https://example.com/image.jpg")
+//	if err != nil {
+//	    // there was an error fetching the image
+//	} else if img == nil {
+//	    // couldn't decode the image
+//	} else {
+//	    // all good :)
+//	}
 func (workers *imageWorkers) getImage(url string) {
 	if !isURL(url) {
 		url = "https://" + url
 	}
 
-    httpResult := workers.http.get(url)
+	httpResult := workers.http.get(url)
 	if httpResult.err != nil {
 		workers.errors <- httpResult.err
-        return
+		return
 	}
-    body := httpResult.body
+	body := httpResult.body
 	if httpResult.status != 200 || !isImage(body) {
-        return
+		return
 	}
 
 	// Check if the image is an ICO file
@@ -60,44 +57,18 @@ func (workers *imageWorkers) getImage(url string) {
 			size := size{width, height}
 			workers.resultChan <- imageData{domain: workers.domain, src: url, size: size, data: body}
 		}
-        return
+		return
 	}
 
 	img, _, err := image.Decode(bytes.NewReader(body))
 	if err != nil {
-        // TODO: maybe add warnings
-        return
+		// TODO: maybe add warnings
+		return
 	}
 	width := img.Bounds().Dx()
 	height := img.Bounds().Dy()
 	size := size{width, height}
 	workers.resultChan <- imageData{domain: workers.domain, src: url, size: size, img: img, data: body}
-}
-
-func encodeImageAsPNG(imagePath string) ([]byte, error) {
-	// Read the ICO file data from file
-	file, err := os.Open(imagePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	// Decode the ICO file
-	icoImage, err := ico.Decode(file)
-	if err != nil {
-		return nil, err
-	}
-
-	img := icoImage
-
-	// Encode the image as PNG and get it as bytes
-	var buf bytes.Buffer
-	err = png.Encode(&buf, img)
-	if err != nil {
-		return nil, err
-	}
-
-	return buf.Bytes(), nil
 }
 
 func saveImageToPNGBytes(img image.Image) ([]byte, error) {
@@ -180,64 +151,6 @@ func isICOFile(data []byte) bool {
 //	}
 func isImage(data []byte) bool {
 	return strings.HasPrefix(http.DetectContentType(data), "image/")
-}
-
-// getICOSize extracts the size and alpha channel data of the first valid icon entry from the given ICO file data.
-//
-// Parameters:
-//
-//	data ([]byte): The ICO file data as a byte list.
-//
-// Returns:
-//
-//	(int, int, []byte, error): The width and height of the icon, the alpha channel data as a byte list, and any error encountered during extraction.
-//
-// Example:
-//
-//	data := []byte{0, 0, 1, 0, 3, 0, 0, 0, 16, 0, 16, 0, 1, 0, 32, 32, ...}
-//	width, height, alphaData, err := getICOSize(data)
-//	if err != nil {
-//	    fmt.Println("Error:", err)
-//	} else {
-//	    fmt.Printf("Icon size: %dx%d\n", width, height)
-//	    // Use alphaData to manipulate the icon's alpha channel.
-//	}
-func getICOSize(data []byte) (int, int, []byte, error) {
-	// ICO file header
-	const (
-		iconDirEntrySize         = 16
-		iconDirEntryWidthOffset  = 6
-		iconDirEntryHeightOffset = 8
-	)
-
-	// Check ICO file signature
-	if len(data) < 6 || data[0] != 0 || data[1] != 0 || data[2] != 1 || data[3] != 0 {
-		return 0, 0, nil, fmt.Errorf("Invalid ICO file format")
-	}
-
-	// Number of icon directory entries
-	iconCount := int(data[4])
-
-	// Iterate through each icon directory entry
-	for i := 0; i < iconCount; i++ {
-		offset := 6 + (i * iconDirEntrySize)
-
-		// Retrieve width and height from the icon directory entry
-		width := int(data[offset+iconDirEntryWidthOffset])
-		height := int(data[offset+iconDirEntryHeightOffset])
-
-		// Check if the icon has dimensions specified (non-zero)
-		if width > 0 && height > 0 {
-			// Find the offset of the alpha channel data
-			imgOffset := int(data[offset+12])
-			imgSize := int(data[offset+8]) // Size of the image data
-			alphaData := data[imgOffset : imgOffset+imgSize]
-
-			return width, height, alphaData, nil
-		}
-	}
-
-	return 0, 0, nil, fmt.Errorf("No valid icon size found")
 }
 
 // pickBestImage picks the image from the given list that best matches the target size.
