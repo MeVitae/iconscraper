@@ -15,6 +15,9 @@ import (
 	"strings"
 	"time"
 
+	_ "golang.org/x/image/bmp"
+	_ "golang.org/x/image/webp"
+
 	_ "github.com/mat/besticon/ico"
 )
 
