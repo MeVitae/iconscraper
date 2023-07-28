@@ -1,10 +1,31 @@
 # Icon-Scraper Package Documentation
+
 `icon-scraper` is a Go package that provides a easy way to get logos from domains and find best target sizes.
+
 ## Description
 
 `icon-scraper` is a Go package that provides a robust, concurent solution for scraping and processing images from defined domains. It fetches the images concurrently, identifying and returning the one that best matches your target size from each domain.
 
 The package is highly performant, utilizing worker goroutines and channels for efficient processing. It offers options to filter square images and define a target size for the images. 
+
+## Icon Sources
+
+- `/favicon.ico`
+- [Icon (`<link rel="icon" href="favicon.ico">`)](https://developer.mozilla.org/en-US/docs/Web/HTML/Attributes/rel#icon)
+- [Web app manifest (`<link rel="manifest" href="manifest.json">`)](https://developer.mozilla.org/en-US/docs/Web/Manifest)
+- [`link rel="shortcut icon"`](https://stackoverflow.com/questions/13211206/html5-link-rel-shortcut-icon)
+- [`link rel="apple-touch-icon"`](https://developer.mozilla.org/en-US/docs/Web/HTML/Attributes/rel#non-standard_values)
+- [`link rel="msapplication-TileImage"`](https://stackoverflow.com/questions/61686919/what-is-the-use-of-the-msapplication-tileimage-meta-tag)
+- [`link rel="mask-icon"`](http://microformats.org/wiki/existing-rel-values)
+- [`link rel="image_src"`](http://microformats.org/wiki/existing-rel-values) (also [this post](https://www.niallkennedy.com/blog/2009/03/enhanced-social-share.html))
+- [`meta itemprop="image"`](https://schema.org/image)
+
+### Other sources
+
+These aren't currently scraped, but might be of interest:
+
+- [`link rel="apple-touch-startup-image"`](http://microformats.org/wiki/existing-rel-values)
+- [`meta property="og:image"`](https://ogp.me/)
 
 ## Usage
 

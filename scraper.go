@@ -2,32 +2,14 @@
 package scraper
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"os"
-	"sync"
+	"regexp"
+
+	"golang.org/x/net/html"
 )
-
-// processReturn is the struct used to store values received when a channel worker sends back a result.
-type processReturn struct {
-	// domain is simply the domain that was processed.
-	domain string
-
-	// result holds the acctual result of the worker, it holds the URL, Image and Source.
-	result Icon
-}
-
-// Icon is an icon
-type Icon struct {
-	// URL is the source location from which the data was fetched or derived.
-	URL string
-
-	// Image holds the parsed image, or nil if the image wasn't parsed (currently the case for ico files).
-	Image image.Image
-
-	// Source is the image source as downloaded.
-	Source []byte
-}
 
 // logErrors logs all the errors sent on the channel to stderr
 func logErrors(errors chan error) {
@@ -36,26 +18,34 @@ func logErrors(errors chan error) {
 	}
 }
 
-type channelHandling struct {
-	urlChan   chan string
-	imageCh   chan imageData
-	imgDoneCh chan imageData
-}
+// Icon is an icon
+type Icon struct {
+	// URL is the source location from which the data was fetched or derived.
+	URL string
 
-type SafeCounter struct {
-	mu    sync.Mutex
-	count int
+	// Type is the sniffed MIME type of the image.
+	Type string
+
+	// Image holds the parsed image config.
+	ImageConfig image.Config
+
+	// Source is the image source as downloaded.
+	Source []byte
 }
 
 // GetIcons scrapes icons from the provided domains concurrently and returns the results as a map from domain to the best image based on the given target.
 //
-// It fetches images from the given domains using multiple worker goroutines.
+// It finds the smallest icon taller than targetHeight or, if there are none, the tallest icon.
+//
+// If no icon is not found for a domain (or no square icon if squareOnly is true), that domain is ommited from the output map.
 //
 // Parameters:
 //   - domains: The domains from which icons are to be scraped.
 //   - squareOnly: If true, only square icons are considered.
 //   - targetHeight: An integer representing the target height of the images to be fetched.
 //   - maxConcurrentProcesses: An integer defining the maximum number of concurrent worker goroutines to be used.
+//
+// TODO: add `allowSvg` to also collect SVG images and prefer them over any other image (since they can be infinitely resized)
 func GetIcons(domains []string, squareOnly bool, targetHeight, maxConcurrentProcesses int) map[string]Icon {
 	// Channel to collect errors
 	errors := make(chan error, 32000)
@@ -79,7 +69,9 @@ func GetIcons(domains []string, squareOnly bool, targetHeight, maxConcurrentProc
 	resultMap := make(map[string]Icon, len(domains))
 	for idx := 0; idx < len(domains); idx++ {
 		res := <-results
-		resultMap[res.domain] = res.result
+		if res.result != nil {
+			resultMap[res.domain] = *res.result
+		}
 	}
 	return resultMap
 }
@@ -94,7 +86,7 @@ func GetIcons(domains []string, squareOnly bool, targetHeight, maxConcurrentProc
 //   - targetHeight: An integer representing the target height of the images to be fetched.
 //   - maxConcurrentProcesses: An integer defining the maximum number of concurrent worker goroutines to be used
 //   - maxConcurrentProcesses:(this should be set from based on the network speed of the machine you are running it on).
-func GetIcon(domain string, squareOnly bool, targetHeight, maxConcurrentProcesses int) Icon {
+func GetIcon(domain string, squareOnly bool, targetHeight, maxConcurrentProcesses int) *Icon {
 	// Channel to collect errors
 	errors := make(chan error, 32000)
 	defer close(errors)
@@ -112,54 +104,82 @@ func GetIcon(domain string, squareOnly bool, targetHeight, maxConcurrentProcesse
 	return (<-results).result
 }
 
-// httpJob represents a GET request, where the results should be sent down the result channel.
-type httpJob struct {
-	url    string
-	result chan httpResult
+// processReturn is the output of processDomain
+type processReturn struct {
+	// domain is the domain that was processed.
+	domain string
+
+	// result holds the result, or nil if there isn't one.
+	result *Icon
 }
 
-// httpWorkerPool manages a fixed size pool of workers to perform HTTP requests.
-type httpWorkerPool struct {
-	// jobs is the channel to send jobs to be completed
-	//
-	// Results are returned down the channel specified in the job
-	jobs chan httpJob
+var domainNameRegexp = regexp.MustCompile(`^([a-zA-Z0-9_][a-zA-Z0-9_-]{0,64})(\.[a-zA-Z0-9_][a-zA-Z0-9_-]{0,64})*[\._]?$`)
 
-	// wg for the spawned workers
-	wg sync.WaitGroup
+// couldBeDomain returns false if domain definitely isn't a valid domain.
+func couldBeDomain(domain string) bool {
+	return len(domain) <= 512 && domainNameRegexp.MatchString(domain)
 }
 
-func newHttpWorkerPool(workers int) *httpWorkerPool {
-	jobs := make(chan httpJob)
-	var wg sync.WaitGroup
-	wg.Add(workers)
-	pool := &httpWorkerPool{
-		jobs: jobs,
-		wg:   wg,
+// processDomain is a worker function that processes getting images for a domain.
+//
+// It fetches HTML content from each URL, parses the HTML content, and extracts
+// image information based on keys and values variables. It then picks the best
+// image from the extracted images based on the `bestSize` parameter and sends
+// the best image back on the result channel, or, if not image was found, it
+// sends back a nil result.
+func processDomain(
+	domain string,
+	squareOnly bool,
+	targetHeight int,
+	http *httpWorkerPool,
+	errors chan error,
+	result chan processReturn,
+) {
+	// Check for obvious cases where the domain passed is invalid
+	if !couldBeDomain(domain) {
+		errors <- fmt.Errorf("Invalid domain name %s", domain)
+		result <- processReturn{
+			domain: domain,
+			result: nil,
+		}
 	}
-	for i := 0; i < workers; i++ {
-		go pool.worker()
-	}
-	return pool
-}
 
-func (pool *httpWorkerPool) worker() {
-	defer pool.wg.Done()
-	for job := range pool.jobs {
-		job.result <- httpGet(job.url)
+	url := "https://" + domain
+	httpResult := http.get(url)
+	// Only check for network errors fetching, if it's an error page, that'll do.
+	if httpResult.err != nil {
+		errors <- fmt.Errorf("Failed to get %s: %w", url, httpResult.err)
+		result <- processReturn{
+			domain: domain,
+			result: nil,
+		}
+		return
 	}
-}
 
-func (pool *httpWorkerPool) get(url string) httpResult {
-	httpResultChan := make(chan httpResult)
-	pool.jobs <- httpJob{
-		url:    url,
-		result: httpResultChan,
+	// Parse the output HTML
+	doc, err := html.Parse(bytes.NewReader(httpResult.body))
+	if err != nil {
+		errors <- fmt.Errorf("Error parsing HTML from %s: %w", url, err)
+		result <- processReturn{
+			domain: domain,
+			result: nil,
+		}
+		return
 	}
-	return <-httpResultChan
-}
 
-func (pool *httpWorkerPool) close() {
-	close(pool.jobs)
-	pool.wg.Wait()
+	// Our requests will be now rooted at the domain we were redirected to.
+	redirectDomain := httpResult.url.Host
+	url = "https://" + redirectDomain
+
+	workers := newImageWorkers(redirectDomain, http, errors)
+	// Always check for `/favicon.ico`, it's not always linked from the HTML.
+	workers.spawn(url + "/favicon.ico")
+	// Spawn workers scraping all the linked icons
+	getImagesFromHTML(doc, redirectDomain, &workers)
+
+	// Pick the best size image from all the results
+	result <- processReturn{
+		domain: domain,
+		result: pickBestImage(squareOnly, targetHeight, workers.results()),
+	}
 }
