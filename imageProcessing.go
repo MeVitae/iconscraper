@@ -35,10 +35,10 @@ type imageWorkers struct {
 	// http is the underlying HTTP worker pool.
 	http *httpWorkerPool
 	// errors is the channel to send errors to, as many errors as needed may be sent.
-	errors chan error
+	errors chan string
 }
 
-func newImageWorkers(domain string, http *httpWorkerPool, errors chan error) imageWorkers {
+func newImageWorkers(domain string, http *httpWorkerPool, errors chan string) imageWorkers {
 	return imageWorkers{
 		domain:      domain,
 		resultChan:  make(chan Icon),
@@ -86,32 +86,34 @@ func (workers *imageWorkers) getImage(url string) {
 	httpResult := workers.http.get(url)
 	// Report an error
 	if httpResult.err != nil {
-		workers.errors <- fmt.Errorf("Failed to get icon %s: %w", url, httpResult.err)
+		workers.errors <- fmt.Sprintf("Failed to get icon %s: %s", url, httpResult.err.Error())
 		workers.failureChan <- struct{}{}
 		return
 	}
 	// Ignore things that aren't 200 (they won't be the icons!)
 	if httpResult.status != 200 {
-		workers.errors <- fmt.Errorf("Failed to get icon %s: http %d", url, httpResult.status)
+		workers.errors <- fmt.Sprintf("Failed to get icon %s: http %d", url, httpResult.status)
 		workers.failureChan <- struct{}{}
 		return
 	}
-
 	// Check the content type, ingore if it's not an image.
 	body := httpResult.body
 	typ := http.DetectContentType(body)
-	if !strings.HasPrefix(typ, "image/") {
-		workers.failureChan <- struct{}{}
-		return
-	}
-
-	// Decode the image properties, and raise an error if this doesn't work.
-	img, _, err := image.DecodeConfig(bytes.NewReader(body))
-	if err != nil {
-		// TODO: maybe these should be warnings not errors
-		workers.errors <- fmt.Errorf("failed to decode image %s: %w", url, err)
-		workers.failureChan <- struct{}{}
-		return
+	var img image.Config
+	var err error
+	// If it is not SVG decode the image config.
+	if !isSVGImage(url) {
+		if !strings.HasPrefix(typ, "image/") {
+			workers.failureChan <- struct{}{}
+			return
+		}
+		// Decode the image properties, and raise an error if this doesn't work.
+		img, _, err = image.DecodeConfig(bytes.NewReader(body))
+		if err != nil {
+			workers.errors <- fmt.Sprintf("Failed to decode image %s: %s", url, err)
+			workers.failureChan <- struct{}{}
+			return
+		}
 	}
 	workers.resultChan <- Icon{
 		URL:         url,
@@ -119,6 +121,20 @@ func (workers *imageWorkers) getImage(url string) {
 		ImageConfig: img,
 		Source:      body,
 	}
+}
+
+// isSVGImage checks if a link is a svg file by looking at their format.
+//
+// isSVG := isSVGImage("/static/images/favicon.svg")
+//
+//	if isSVG {
+//		fmt.Println("Image is SVG")
+//	}else{
+//
+// fmt.Println("Image is not SVG")
+// }
+func isSVGImage(filename string) bool {
+	return strings.HasSuffix(strings.ToLower(filename), ".svg")
 }
 
 // pickBestImage picks the image from the given list that best matches the target size.
@@ -134,7 +150,7 @@ func (workers *imageWorkers) getImage(url string) {
 //		targetHeight := 700
 //		bestImage := pickBestImage(squareOnly, targetHeight, images)
 //	    // bestImage.img.Height == 800
-func pickBestImage(squareOnly bool, targetHeight int, images []Icon) *Icon {
+func pickBestImage(squareOnly bool, targetHeight int, images []Icon, allowSvg bool) *Icon {
 	// Track the largest image
 	var largestImage *Icon
 	// Track the smallest image larger than `targetHeight`
@@ -142,6 +158,10 @@ func pickBestImage(squareOnly bool, targetHeight int, images []Icon) *Icon {
 
 	for idx := range images {
 		image := &images[idx]
+		fmt.Println(image.URL)
+		if allowSvg && isSVGImage(image.URL) {
+			return image
+		}
 		// Maybe skip non-square images
 		if squareOnly && image.ImageConfig.Width != image.ImageConfig.Height {
 			continue

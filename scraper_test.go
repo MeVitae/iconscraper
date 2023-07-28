@@ -5,8 +5,14 @@ import (
 )
 
 func TestSomeSites(t *testing.T) {
+	config := ScraperConfig{
+		squareOnly:             true,
+		targetHeight:           128,
+		maxConcurrentProcesses: 20,
+		allowSvg:               false,
+	}
 	domains := []string{"google.com", "jotpot.uk", "example.com", "gov.uk", "mevitae.com", "microsoft.com", "apple.com", "golang.org", "rust-lang.org", "pkg.go.dev"}
-	icons := GetIcons(domains, true, 128, 20)
+	icons := GetIcons(domains, config)
 	if icon, ok := icons["example.com"]; ok {
 		t.Error("found icon for example.com", ok, icon)
 	}

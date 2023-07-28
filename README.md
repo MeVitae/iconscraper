@@ -34,6 +34,14 @@ These aren't currently scraped, but might be of interest:
 ```go
 import "github.com/MeVitae/icon-scraper"
 
+// Create the config on which you will be looking for icons.
+config := ScraperConfig{
+	squareOnly:             true,
+	targetHeight:           128,
+	maxConcurrentProcesses: 20,
+	allowSvg:               false,
+}
+
 // Define the list of domains you want to get the logo from.
 domains := []string{"https://example.com", "https://example.net", "https://example.org"}
 
@@ -42,7 +50,7 @@ domains := []string{"https://example.com", "https://example.net", "https://examp
 // 2. Square Only Requirement 
 // 3. Target Height 
 // 4. Max Concurrent processes (Set this based on your network!)
-icons := scraper.GetIcons(domains, false, 100, 4)
+icons := scraper.GetIcons(domains, config)
 
 // Iterate over the return map to use the scraped icons
 for domain, icon := range icons {
@@ -55,6 +63,14 @@ for domain, icon := range icons {
 ```go
 import "github.com/MeVitae/icon-scraper"
 
+// Create the config on which you will be looking for icons.
+config := ScraperConfig{
+	squareOnly:             true,
+	targetHeight:           128,
+	maxConcurrentProcesses: 20,
+	allowSvg:               false,
+}
+
 // Define the domain you want to get the logo from.
 domain := "https://example.com"
 
@@ -63,7 +79,7 @@ domain := "https://example.com"
 // 2. Square Only Requirement 
 // 3. Target Height 
 // 4. Max Concurrent processes (Set this based on your network!)
-icon := scraper.GetIcon(domain, false, 64, 4)
+icon := scraper.GetIcon(domain, config)
 
 // Use the returned icon
 fmt.Println("Domain:",domain,", Icon URL:", icon.URL)

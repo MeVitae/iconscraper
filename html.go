@@ -37,8 +37,8 @@ func getURL(domain, path string) string {
 // - n: The HTML node to search for image-related attributes.
 // - url: The base URL to resolve relative image URLs.
 func getImagesFromHTML(node *html.Node, domain string, workers *imageWorkers) {
-	// TODO: don't even traverse into the body!
 	if node.Type == html.ElementNode && node.Data == "head" {
+		// Process the "head" node elements
 		for c := node.FirstChild; c != nil; c = c.NextSibling {
 			if c.Type == html.ElementNode && c.Data == "link" {
 				rel := getNodeAttr(c, "rel")
@@ -64,10 +64,10 @@ func getImagesFromHTML(node *html.Node, domain string, workers *imageWorkers) {
 				}
 			}
 		}
-	} else {
-		for c := node.FirstChild; c != nil; c = c.NextSibling {
-			getImagesFromHTML(c, domain, workers)
-		}
+		return
+	}
+	for c := node.FirstChild; c != nil; c = c.NextSibling {
+		getImagesFromHTML(c, domain, workers)
 	}
 }
 

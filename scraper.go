@@ -12,9 +12,9 @@ import (
 )
 
 // logErrors logs all the errors sent on the channel to stderr
-func logErrors(errors chan error) {
+func logErrors(errors chan string) {
 	for err := range errors {
-		fmt.Fprintln(os.Stderr, err.Error())
+		fmt.Println("Warning:", os.Stderr, err)
 	}
 }
 
@@ -33,6 +33,19 @@ type Icon struct {
 	Source []byte
 }
 
+// ScraperConfig is the config used foor GetIcons and GetIcon.
+// Parameters:
+//   - squareOnly: If true, only square icons are considered.
+//   - targetHeight: An integer representing the target height of the images to be fetched.
+//   - allowSvg: If true, if svg is found svg will be returned.
+//   - maxConcurrentProcesses: An integer defining the maximum number of concurrent worker goroutines to be used.
+type ScraperConfig struct {
+	squareOnly             bool
+	targetHeight           int
+	allowSvg               bool
+	maxConcurrentProcesses int
+}
+
 // GetIcons scrapes icons from the provided domains concurrently and returns the results as a map from domain to the best image based on the given target.
 //
 // It finds the smallest icon taller than targetHeight or, if there are none, the tallest icon.
@@ -41,19 +54,17 @@ type Icon struct {
 //
 // Parameters:
 //   - domains: The domains from which icons are to be scraped.
-//   - squareOnly: If true, only square icons are considered.
-//   - targetHeight: An integer representing the target height of the images to be fetched.
-//   - maxConcurrentProcesses: An integer defining the maximum number of concurrent worker goroutines to be used.
+//   - config: Of type ScraperConfig which holds all the config needed for the scraper to run and find best icons.
 //
 // TODO: add `allowSvg` to also collect SVG images and prefer them over any other image (since they can be infinitely resized)
-func GetIcons(domains []string, squareOnly bool, targetHeight, maxConcurrentProcesses int) map[string]Icon {
+func GetIcons(domains []string, config ScraperConfig) map[string]Icon {
 	// Channel to collect errors
-	errors := make(chan error, 32000)
+	errors := make(chan string, 32000)
 	defer close(errors)
 	go logErrors(errors)
 
 	// HTTP worker pool
-	http := newHttpWorkerPool(maxConcurrentProcesses)
+	http := newHttpWorkerPool(config.maxConcurrentProcesses)
 	defer http.close()
 
 	// Channel to collect results
@@ -62,7 +73,7 @@ func GetIcons(domains []string, squareOnly bool, targetHeight, maxConcurrentProc
 
 	// Spawn a goroutine for every domain, these will be rate limited by the http pool.
 	for _, domain := range domains {
-		go processDomain(domain, squareOnly, targetHeight, http, errors, results)
+		go processDomain(domain, config.squareOnly, config.targetHeight, http, errors, results, config.allowSvg)
 	}
 
 	// Collect results
@@ -86,21 +97,21 @@ func GetIcons(domains []string, squareOnly bool, targetHeight, maxConcurrentProc
 //   - targetHeight: An integer representing the target height of the images to be fetched.
 //   - maxConcurrentProcesses: An integer defining the maximum number of concurrent worker goroutines to be used
 //   - maxConcurrentProcesses:(this should be set from based on the network speed of the machine you are running it on).
-func GetIcon(domain string, squareOnly bool, targetHeight, maxConcurrentProcesses int) *Icon {
+func GetIcon(domain string, config ScraperConfig) *Icon {
 	// Channel to collect errors
-	errors := make(chan error, 32000)
+	errors := make(chan string, 32000)
 	defer close(errors)
 	go logErrors(errors)
 
 	// HTTP worker pool
-	http := newHttpWorkerPool(maxConcurrentProcesses)
+	http := newHttpWorkerPool(config.maxConcurrentProcesses)
 	defer http.close()
 
 	// Channel to collect results
 	results := make(chan processReturn, 1)
 	defer close(results)
 
-	processDomain(domain, squareOnly, targetHeight, http, errors, results)
+	processDomain(domain, config.squareOnly, config.targetHeight, http, errors, results, config.allowSvg)
 	return (<-results).result
 }
 
@@ -132,12 +143,13 @@ func processDomain(
 	squareOnly bool,
 	targetHeight int,
 	http *httpWorkerPool,
-	errors chan error,
+	errors chan string,
 	result chan processReturn,
+	allowSvg bool,
 ) {
 	// Check for obvious cases where the domain passed is invalid
 	if !couldBeDomain(domain) {
-		errors <- fmt.Errorf("Invalid domain name %s", domain)
+		errors <- fmt.Sprintf("Invalid domain name %s", domain)
 		result <- processReturn{
 			domain: domain,
 			result: nil,
@@ -148,7 +160,7 @@ func processDomain(
 	httpResult := http.get(url)
 	// Only check for network errors fetching, if it's an error page, that'll do.
 	if httpResult.err != nil {
-		errors <- fmt.Errorf("Failed to get %s: %w", url, httpResult.err)
+		errors <- fmt.Sprintf("Failed to get %s: %s", url, httpResult.err.Error())
 		result <- processReturn{
 			domain: domain,
 			result: nil,
@@ -159,7 +171,7 @@ func processDomain(
 	// Parse the output HTML
 	doc, err := html.Parse(bytes.NewReader(httpResult.body))
 	if err != nil {
-		errors <- fmt.Errorf("Error parsing HTML from %s: %w", url, err)
+		errors <- fmt.Sprintf("Error parsing HTML from %s: %s", url, err.Error())
 		result <- processReturn{
 			domain: domain,
 			result: nil,
@@ -180,6 +192,6 @@ func processDomain(
 	// Pick the best size image from all the results
 	result <- processReturn{
 		domain: domain,
-		result: pickBestImage(squareOnly, targetHeight, workers.results()),
+		result: pickBestImage(squareOnly, targetHeight, workers.results(), allowSvg),
 	}
 }
