@@ -5,11 +5,11 @@ import (
 )
 
 func TestSomeSites(t *testing.T) {
-	config := ScraperConfig{
-		squareOnly:             true,
-		targetHeight:           128,
-		maxConcurrentProcesses: 20,
-		allowSvg:               false,
+	config := Config{
+		SquareOnly:             true,
+		TargetHeight:           128,
+		MaxConcurrentProcesses: 20,
+		AllowSvg:               false,
 	}
 	domains := []string{"google.com", "jotpot.uk", "example.com", "gov.uk", "mevitae.com", "microsoft.com", "apple.com", "golang.org", "rust-lang.org", "pkg.go.dev"}
 	icons := GetIcons(domains, config)

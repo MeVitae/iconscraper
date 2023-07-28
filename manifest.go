@@ -40,12 +40,12 @@ func processManifest(domain, manifestUrl string, workers *imageWorkers) {
 	httpResult := workers.http.get(manifestUrl)
 	// Report an error
 	if httpResult.err != nil {
-		workers.errors <- fmt.Sprintf("Failed to get manifest %s:", httpResult.err)
+		workers.errors <- httpResult.err
 		return
 	}
 	// Ignore things that aren't 200 (they won't be the manifest!)
 	if httpResult.status != 200 {
-		workers.errors <- fmt.Sprintf("Failed to get manifest %s: http %d", manifestUrl, httpResult.status)
+		workers.errors <- fmt.Errorf("Failed to get manifest %s: http %d", manifestUrl, httpResult.status)
 		return
 	}
 
@@ -53,7 +53,7 @@ func processManifest(domain, manifestUrl string, workers *imageWorkers) {
 	var manifest app
 	err := json.Unmarshal(httpResult.body, &manifest)
 	if err != nil {
-		workers.errors <- fmt.Sprintf("Failed to parse manifest %s: %s", manifestUrl, err.Error())
+		workers.errors <- fmt.Errorf("Failed to parse manifest %s: %w", manifestUrl, err)
 		return
 	}
 

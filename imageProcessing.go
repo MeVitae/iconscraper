@@ -35,16 +35,20 @@ type imageWorkers struct {
 	// http is the underlying HTTP worker pool.
 	http *httpWorkerPool
 	// errors is the channel to send errors to, as many errors as needed may be sent.
-	errors chan string
+	errors chan error
+
+	// warnings channel to send warnings to.
+	warnings chan error
 }
 
-func newImageWorkers(domain string, http *httpWorkerPool, errors chan string) imageWorkers {
+func newImageWorkers(domain string, http *httpWorkerPool, errors chan error, warnings chan error) imageWorkers {
 	return imageWorkers{
 		domain:      domain,
 		resultChan:  make(chan Icon),
 		failureChan: make(chan struct{}),
 		http:        http,
 		errors:      errors,
+		warnings:    warnings,
 	}
 }
 
@@ -86,13 +90,13 @@ func (workers *imageWorkers) getImage(url string) {
 	httpResult := workers.http.get(url)
 	// Report an error
 	if httpResult.err != nil {
-		workers.errors <- fmt.Sprintf("Failed to get icon %s: %s", url, httpResult.err.Error())
+		workers.warnings <- fmt.Errorf("Failed to get icon %s: %w", url, httpResult.err)
 		workers.failureChan <- struct{}{}
 		return
 	}
 	// Ignore things that aren't 200 (they won't be the icons!)
 	if httpResult.status != 200 {
-		workers.errors <- fmt.Sprintf("Failed to get icon %s: http %d", url, httpResult.status)
+		workers.warnings <- fmt.Errorf("Failed to get icon %s: %w", url, httpResult.err)
 		workers.failureChan <- struct{}{}
 		return
 	}
@@ -110,7 +114,7 @@ func (workers *imageWorkers) getImage(url string) {
 		// Decode the image properties, and raise an error if this doesn't work.
 		img, _, err = image.DecodeConfig(bytes.NewReader(body))
 		if err != nil {
-			workers.errors <- fmt.Sprintf("Failed to decode image %s: %s", url, err)
+			workers.warnings <- fmt.Errorf("failed to decode image %s: %w", url, err)
 			workers.failureChan <- struct{}{}
 			return
 		}
