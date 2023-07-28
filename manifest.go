@@ -1,4 +1,4 @@
-package scraper
+package iconscraper
 
 import (
 	"encoding/json"

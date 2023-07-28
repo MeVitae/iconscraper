@@ -1,10 +1,10 @@
 # Icon-Scraper Package Documentation
 
-`icon-scraper` is a Go package that provides a easy way to get logos from domains and find best target sizes.
+`iconscraper` is a Go package that provides a easy way to get logos from domains and find best target sizes.
 
 ## Description
 
-`icon-scraper` is a Go package that provides a robust, concurent solution for scraping and processing images from defined domains. It fetches the images concurrently, identifying and returning the one that best matches your target size from each domain.
+`iconscraper` is a Go package that provides a robust, concurent solution for scraping and processing images from defined domains. It fetches the images concurrently, identifying and returning the one that best matches your target size from each domain.
 
 The package is highly performant, utilizing worker goroutines and channels for efficient processing. It offers options to filter square images and define a target size for the images. 
 
@@ -32,7 +32,7 @@ These aren't currently scraped, but might be of interest:
 ### Get Icons from multiple domains:
 
 ```go
-import "github.com/MeVitae/icon-scraper"
+import "github.com/MeVitae/iconscraper"
 
 // Create the config on which you will be looking for icons.
 config := ScraperConfig{
@@ -61,7 +61,7 @@ for domain, icon := range icons {
 ### Get Icon from a single domain:
 
 ```go
-import "github.com/MeVitae/icon-scraper"
+import "github.com/MeVitae/iconscraper"
 
 // Create the config on which you will be looking for icons.
 config := ScraperConfig{

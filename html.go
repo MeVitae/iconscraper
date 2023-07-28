@@ -1,4 +1,4 @@
-package scraper
+package iconscraper
 
 import (
 	"golang.org/x/net/html"

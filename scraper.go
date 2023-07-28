@@ -1,5 +1,5 @@
-// Package scraper provides functionalities for scraping and processing images from domains and returns the best one based on its size and your target size.
-package scraper
+// package iconscraper provides functionalities for scraping and processing images from domains and returns the best one based on its size and your target size.
+package iconscraper
 
 import (
 	"bytes"
