@@ -59,7 +59,7 @@ config := iconscraper.Config{
 	TargetHeight:           128,
 	MaxConcurrentProcesses: 20,
 	AllowSvg:               false,
-	Errors:	            make(chan error, 32000),
+	Errors:	            	make(chan error, 32000),
 	Warnings:               make(chan error, 32000),
 }
 
