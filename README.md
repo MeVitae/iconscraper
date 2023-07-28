@@ -34,23 +34,48 @@ These aren't currently scraped, but might be of interest:
 ```go
 import "github.com/MeVitae/iconscraper"
 
-// Create the config on which you will be looking for icons.
-config := ScraperConfig{
-	squareOnly:             true,
-	targetHeight:           128,
-	maxConcurrentProcesses: 20,
-	allowSvg:               false,
+// Receive errors when happening (you can use this to save them and analyse what does not work).
+func handleErrors(errors chan error) {
+	for err := range errors {
+		fmt.Fprintln(os.Stderr, err.Error())
+		// do some processing on the errors
+	}
 }
+
+// Receive warnings when happening (you can use this to save them and analyse what does not work).
+func handleWarnings(warnings chan error) {
+	for err := range warnings {
+		fmt.Fprintln(os.Stderr, err.Error())
+		// do some processing on the errors
+	}
+}
+
+
+// Create the config on which you will be looking for icons.
+config := iconscraper.Config{
+	SquareOnly:             true,
+	TargetHeight:           128,
+	MaxConcurrentProcesses: 20,
+	AllowSvg:               false,
+	Errors:					make(chan error, 32000), // If left empty, a channel for logging will automatically be created and errors will be printed!
+	Warnings:				make(chan error, 32000), // If left empty, a channel for logging will automatically be created and warnings will be printed!
+}
+
+// create go routines for handling errors and warnings.
+go handleErrors(config.Errors)
+go handleWarnings(config.Warnings)
 
 // Define the list of domains you want to get the logo from.
 domains := []string{"https://example.com", "https://example.net", "https://example.org"}
+
+//Create a go routine for
 
 // Call GetIcons function with:
 // 1. Domains list 
 // 2. Square Only Requirement 
 // 3. Target Height 
 // 4. Max Concurrent processes (Set this based on your network!)
-icons := scraper.GetIcons(domains, config)
+icons := iconscraper.GetIcons(domains, config)
 
 // Iterate over the return map to use the scraped icons
 for domain, icon := range icons {
@@ -64,11 +89,11 @@ for domain, icon := range icons {
 import "github.com/MeVitae/iconscraper"
 
 // Create the config on which you will be looking for icons.
-config := ScraperConfig{
-	squareOnly:             true,
-	targetHeight:           128,
-	maxConcurrentProcesses: 20,
-	allowSvg:               false,
+config := iconscraper.Config{
+	SquareOnly:             true,
+	TargetHeight:           128,
+	MaxConcurrentProcesses: 20,
+	AllowSvg:               false,
 }
 
 // Define the domain you want to get the logo from.
@@ -79,7 +104,7 @@ domain := "https://example.com"
 // 2. Square Only Requirement 
 // 3. Target Height 
 // 4. Max Concurrent processes (Set this based on your network!)
-icon := scraper.GetIcon(domain, config)
+icon := iconscraper.GetIcon(domain, config)
 
 // Use the returned icon
 fmt.Println("Domain:",domain,", Icon URL:", icon.URL)

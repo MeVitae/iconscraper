@@ -21,7 +21,7 @@ func logErrors(errors chan error) {
 // logWarnings logs all the warnings sent on the channel to stderr
 func logWarnings(errors chan error) {
 	for err := range errors {
-		fmt.Fprintln(os.Stderr, err.Error())
+		fmt.Fprintln(os.Stderr, "Warning:", err.Error())
 	}
 }
 
@@ -40,24 +40,24 @@ type Icon struct {
 	Source []byte
 }
 
-// ScraperConfig is the config used for GetIcons and GetIcon.
+// Config is the config used for GetIcons and GetIcon.
 type Config struct {
-	//squareOnly If true, only square icons are considered.
+	//SquareOnly If true, only square icons are considered.
 	SquareOnly bool
 
-	// targetHeight An integer representing the target height of the images to be fetched.
+	// TargetHeight An integer representing the target height of the images to be fetched.
 	TargetHeight int
 
-	// allowSvg If true, if svg is found svg will be returned.
+	// AllowSvg If true, if svg is found svg will be returned.
 	AllowSvg bool
 
-	//maxConcurrentProcesses An integer defining the maximum number of concurrent worker goroutines to be used.
+	//MaxConcurrentProcesses An integer defining the maximum number of concurrent worker goroutines to be used.
 	MaxConcurrentProcesses int
 
-	// errors is the channel for receiving errors (if left empty a go routine will automatically be created to log the errrors).
+	// Errors is the channel for receiving errors (if left empty a go routine will automatically be created to log the errrors).
 	Errors chan error
 
-	// errors is the channel for receiving warnings (if left empty a go routine will automatically be created to log the warnings).
+	// Warnings is the channel for receiving warnings (if left empty a go routine will automatically be created to log the warnings).
 	Warnings chan error
 }
 

@@ -45,7 +45,7 @@ func processManifest(domain, manifestUrl string, workers *imageWorkers) {
 	}
 	// Ignore things that aren't 200 (they won't be the manifest!)
 	if httpResult.status != 200 {
-		workers.errors <- fmt.Errorf("Failed to get manifest %s: http %d", manifestUrl, httpResult.status)
+		workers.warnings <- fmt.Errorf("Failed to get manifest %s: http %d", manifestUrl, httpResult.status)
 		return
 	}
 
@@ -53,7 +53,7 @@ func processManifest(domain, manifestUrl string, workers *imageWorkers) {
 	var manifest app
 	err := json.Unmarshal(httpResult.body, &manifest)
 	if err != nil {
-		workers.errors <- fmt.Errorf("Failed to parse manifest %s: %w", manifestUrl, err)
+		workers.warnings <- fmt.Errorf("Failed to parse manifest %s: %w", manifestUrl, err)
 		return
 	}
 

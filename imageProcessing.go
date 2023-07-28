@@ -90,13 +90,13 @@ func (workers *imageWorkers) getImage(url string) {
 	httpResult := workers.http.get(url)
 	// Report an error
 	if httpResult.err != nil {
-		workers.warnings <- fmt.Errorf("Failed to get icon %s: %w", url, httpResult.err)
+		workers.errors <- fmt.Errorf("Failed to get icon %s: %w", url, httpResult.err)
 		workers.failureChan <- struct{}{}
 		return
 	}
 	// Ignore things that aren't 200 (they won't be the icons!)
 	if httpResult.status != 200 {
-		workers.warnings <- fmt.Errorf("Failed to get icon %s: %w", url, httpResult.err)
+		workers.warnings <- fmt.Errorf("Failed to get icon %s: %d", url, httpResult.status)
 		workers.failureChan <- struct{}{}
 		return
 	}
