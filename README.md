@@ -52,13 +52,15 @@ func handleWarnings(warnings chan error) {
 
 
 // Create the config on which you will be looking for icons.
+// If Errors or Warnings fields left empty, a channel for 
+// logging will automatically be created and errors will be printed!
 config := iconscraper.Config{
 	SquareOnly:             true,
 	TargetHeight:           128,
 	MaxConcurrentProcesses: 20,
 	AllowSvg:               false,
-	Errors:					make(chan error, 32000), // If left empty, a channel for logging will automatically be created and errors will be printed!
-	Warnings:				make(chan error, 32000), // If left empty, a channel for logging will automatically be created and warnings will be printed!
+	Errors:	            make(chan error, 32000),
+	Warnings:               make(chan error, 32000),
 }
 
 // create go routines for handling errors and warnings.
