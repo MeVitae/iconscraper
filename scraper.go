@@ -82,12 +82,12 @@ type Config struct {
 func GetIcons(domains []string, config Config) map[string]Icon {
 	// Creating go routines for handling Errors and Warnings where none are initialised.
 	if config.Errors == nil {
-		config.Errors = make(chan error, 32000)
+		config.Errors = make(chan error)
 		go logErrors(config.Errors)
 		defer close(config.Errors)
 	}
 	if config.Warnings == nil {
-		config.Warnings = make(chan error, 32000)
+		config.Warnings = make(chan error)
 		go logWarnings(config.Warnings)
 		defer close(config.Warnings)
 	}
@@ -128,9 +128,10 @@ func GetIcons(domains []string, config Config) map[string]Icon {
 //   - maxConcurrentProcesses:(this should be set from based on the network speed of the machine you are running it on).
 func GetIcon(domain string, config Config) *Icon {
 	// Channel to collect errors
-	errors := make(chan error, 32000)
-	warnings := make(chan error, 32000)
+	errors := make(chan error)
+	warnings := make(chan error)
 	defer close(errors)
+	defer close(warnings)
 	go logErrors(errors)
 	go logWarnings(warnings)
 
