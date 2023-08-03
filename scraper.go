@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"image"
-	"os"
+	"log"
 	"regexp"
 
 	"golang.org/x/net/html"
@@ -14,14 +14,14 @@ import (
 // logErrors logs all the errors sent on the channel to stderr
 func logErrors(errors chan error) {
 	for err := range errors {
-		fmt.Fprintln(os.Stderr, err.Error())
+		log.Println(err.Error())
 	}
 }
 
 // logWarnings logs all the warnings sent on the channel to stderr
 func logWarnings(errors chan error) {
 	for err := range errors {
-		fmt.Fprintln(os.Stderr, "Warning:", err.Error())
+		log.Println("Warning:", err.Error())
 	}
 }
 
@@ -42,22 +42,31 @@ type Icon struct {
 
 // Config is the config used for GetIcons and GetIcon.
 type Config struct {
-	//SquareOnly If true, only square icons are considered.
+	// SquareOnly determines if only square icons are considered.
 	SquareOnly bool
 
-	// TargetHeight An integer representing the target height of the images to be fetched.
+	// TargetHeight of the icon to be fetched. The shortest image larger than this size will be
+	// returned and, if none are available, the tallest image smaller than this will be returned.
 	TargetHeight int
 
-	// AllowSvg If true, if svg is found svg will be returned.
+	// AllowSvg allows SVGs to be returned. An SVG will always supersede a non-vector image.
 	AllowSvg bool
 
-	// MaxConcurrentRequests An integer defining the maximum number of concurrent worker goroutines to be used.
+	// MaxConcurrentRequests sets the maximum number of concurrent HTTP requests.
 	MaxConcurrentRequests int
 
-	// Errors is the channel for receiving errors (if left empty a go routine will automatically be created to log the errrors).
+	// Errors is the channel for receiving errors.
+	//
+	// If nil, errors will instead by logged to the default logger.
+	//
+	// The channel must not block.
 	Errors chan error
 
-	// Warnings is the channel for receiving warnings (if left empty a go routine will automatically be created to log the warnings).
+	// Warnings is the channel for receiving warning.
+	//
+	// If nil, warnings will instead by logged to the default logger.
+	//
+	// The channel must not block.
 	Warnings chan error
 }
 
@@ -65,13 +74,11 @@ type Config struct {
 //
 // It finds the smallest icon taller than targetHeight or, if there are none, the tallest icon.
 //
-// If no icon is not found for a domain (or no square icon if squareOnly is true), that domain is ommited from the output map.
+// If no icon is not found for a domain (or no square icon if squareOnly is true), that domain is omitted from the output map.
 //
 // Parameters:
 //   - domains: The domains from which icons are to be scraped.
 //   - config: Of type ScraperConfig which holds all the config needed for the scraper to run and find best icons.
-//
-// TODO: add `allowSvg` to also collect SVG images and prefer them over any other image (since they can be infinitely resized)
 func GetIcons(domains []string, config Config) map[string]Icon {
 	// Creating go routines for handling Errors and Warnings where none are initialised.
 	if config.Errors == nil {
@@ -82,6 +89,7 @@ func GetIcons(domains []string, config Config) map[string]Icon {
 	if config.Warnings == nil {
 		config.Warnings = make(chan error, 32000)
 		go logWarnings(config.Warnings)
+		defer close(config.Warnings)
 	}
 
 	// HTTP worker pool
