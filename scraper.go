@@ -80,7 +80,7 @@ type Config struct {
 //   - domains: The domains from which icons are to be scraped.
 //   - config: Of type ScraperConfig which holds all the config needed for the scraper to run and find best icons.
 func GetIcons(domains []string, config Config) map[string]Icon {
-	// Creating go routines for handling Errors and Warnings where none are initialised.
+	// Create error and warning handler channels if not provided. By default, these are consumed and logged.
 	if config.Errors == nil {
 		config.Errors = make(chan error)
 		go logErrors(config.Errors)
@@ -127,13 +127,17 @@ func GetIcons(domains []string, config Config) map[string]Icon {
 //   - maxConcurrentProcesses: An integer defining the maximum number of concurrent worker goroutines to be used
 //   - maxConcurrentProcesses:(this should be set from based on the network speed of the machine you are running it on).
 func GetIcon(domain string, config Config) *Icon {
-	// Channel to collect errors
-	errors := make(chan error)
-	warnings := make(chan error)
-	defer close(errors)
-	defer close(warnings)
-	go logErrors(errors)
-	go logWarnings(warnings)
+	// Create error and warning handler channels if not provided. By default, these are consumed and logged.
+	if config.Errors == nil {
+		config.Errors = make(chan error)
+		go logErrors(config.Errors)
+		defer close(config.Errors)
+	}
+	if config.Warnings == nil {
+		config.Warnings = make(chan error)
+		go logWarnings(config.Warnings)
+		defer close(config.Warnings)
+	}
 
 	// HTTP worker pool
 	http := newHttpWorkerPool(config.MaxConcurrentRequests)
@@ -143,7 +147,7 @@ func GetIcon(domain string, config Config) *Icon {
 	results := make(chan processReturn, 1)
 	defer close(results)
 
-	processDomain(domain, config.SquareOnly, config.TargetHeight, http, warnings, errors, results, config.AllowSvg)
+	processDomain(domain, config.SquareOnly, config.TargetHeight, http, config.Warnings, config.Errors, results, config.AllowSvg)
 	return (<-results).result
 }
 
