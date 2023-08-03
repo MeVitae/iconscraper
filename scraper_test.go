@@ -12,7 +12,7 @@ func TestSomeSites(t *testing.T) {
 		AllowSvg:              false,
 	}
 	domains := []string{"google.com", "jotpot.uk", "example.com", "gov.uk", "mevitae.com", "microsoft.com", "apple.com", "golang.org", "rust-lang.org", "pkg.go.dev"}
-	icons := GetIcons(domains, config)
+	icons := GetIcons(config, domains)
 	if icon, ok := icons["example.com"]; ok {
 		t.Error("found icon for example.com", ok, icon)
 	}
@@ -53,7 +53,7 @@ func TestSomeSitesWithSVG(t *testing.T) {
 		AllowSvg:              true,
 	}
 	domains := []string{"google.com", "jotpot.uk", "example.com", "gov.uk", "mevitae.com", "microsoft.com", "apple.com", "golang.org", "rust-lang.org", "pkg.go.dev"}
-	icons := GetIcons(domains, config)
+	icons := GetIcons(config, domains)
 	if icon, ok := icons["example.com"]; ok {
 		t.Error("found icon for example.com", ok, icon)
 	}

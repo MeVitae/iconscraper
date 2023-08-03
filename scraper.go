@@ -1,4 +1,81 @@
-// package iconscraper provides functionalities for scraping and processing images from domains and returns the best one based on its size and your target size.
+// package iconscraper provides a robust solution to get icons from domains.
+//
+// # Icon Sources
+//
+// - `/favicon.ico`
+// - [Icon (`<link rel="icon" href="favicon.ico">`)](https://developer.mozilla.org/en-US/docs/Web/HTML/Attributes/rel#icon)
+// - [Web app manifest (`<link rel="manifest" href="manifest.json">`)](https://developer.mozilla.org/en-US/docs/Web/Manifest)
+// - [`link rel="shortcut icon"`](https://stackoverflow.com/questions/13211206/html5-link-rel-shortcut-icon)
+// - [`link rel="apple-touch-icon"`](https://developer.mozilla.org/en-US/docs/Web/HTML/Attributes/rel#non-standard_values)
+// - [`link rel="msapplication-TileImage"`](https://stackoverflow.com/questions/61686919/what-is-the-use-of-the-msapplication-tileimage-meta-tag)
+// - [`link rel="mask-icon"`](http://microformats.org/wiki/existing-rel-values)
+// - [`link rel="image_src"`](http://microformats.org/wiki/existing-rel-values) (also [this post](https://www.niallkennedy.com/blog/2009/03/enhanced-social-share.html))
+// - [`meta itemprop="image"`](https://schema.org/image)
+//
+// # Other sources
+//
+// These aren't currently scraped, but might be of interest:
+//
+// - [`link rel="apple-touch-startup-image"`](http://microformats.org/wiki/existing-rel-values)
+// - [`meta property="og:image"`](https://ogp.me/)
+//
+// # Get icons from multiple domains
+//
+//     import "github.com/MeVitae/iconscraper"
+//
+//     config := Config{
+//         SquareOnly:            true,
+//         TargetHeight:          128,
+//         MaxConcurrentRequests: 32,
+//         AllowSvg:              false,
+//     }
+//
+//     domains := []string{"mevitae.com", "example.com", "gov.uk", "golang.org", "rust-lang.org"}
+//
+//     icons := iconscraper.GetIcons(config, domains)
+//
+//     for domain, icon := range icons {
+//     	fmt.Println("Domain: " + domain + ", Icon URL: " + icon.URL)
+//     }
+//
+// # Handle errors and warnings.
+//
+// Errors related to decoding images or resources not being found on a web server (but the connection
+// being ok) will be reported as warnings instead of errors.
+//
+// By default, errors and warnings are only logged to the console. You can handle errors yourself by
+// adding your own channel in the config, for example:
+//
+//     import "github.com/MeVitae/iconscraper"
+//
+//     config := Config{
+//         SquareOnly:            true,
+//         TargetHeight:          128,
+//         MaxConcurrentRequests: 32,
+//         AllowSvg:              false,
+//         Errors:                make(chan error),
+//     }
+//
+//     go func(){
+//         for err := range config.Errors {
+//             // Handle err
+//         }
+//     }()
+//
+//     domains := []string{"mevitae.com", "example.com", "gov.uk", "golang.org", "rust-lang.org"}
+//
+//     icons := iconscraper.GetIcons(config, domains)
+//
+//     for domain, icon := range icons {
+//     	fmt.Println("Domain: " + domain + ", Icon URL: " + icon.URL)
+//     }
+//
+// Warnings can be similarly handled using the `Warnings` field.
+//
+// # Get icon from a single domain
+//
+// Icons can be scraped for a single domain using `GetIcon`. Errors and warnings are handled in the
+// same way.
 package iconscraper
 
 import (
@@ -77,11 +154,7 @@ type Config struct {
 // It finds the smallest icon taller than targetHeight or, if there are none, the tallest icon.
 //
 // If no icon is not found for a domain (or no square icon if squareOnly is true), that domain is omitted from the output map.
-//
-// Parameters:
-//   - domains: The domains from which icons are to be scraped.
-//   - config: Of type ScraperConfig which holds all the config needed for the scraper to run and find best icons.
-func GetIcons(domains []string, config Config) map[string]Icon {
+func GetIcons(config Config, domains []string) map[string]Icon {
 	// Create error and warning handler channels if not provided. By default, these are consumed and logged.
 	if config.Errors == nil {
 		config.Errors = make(chan error)
@@ -118,17 +191,10 @@ func GetIcons(domains []string, config Config) map[string]Icon {
 	return resultMap
 }
 
-// GetIcon scrapes icons from the provided domain concurrently and returns the results as a map from domain to the best image based on the given target.
+// GetIcons scrapes icons from the provided domain and finds the smallest icon taller than targetHeight or, if there are none, the tallest icon.
 //
-// It fetches images from the given domains using multiple worker goroutines.
-//
-// Parameters:
-//   - domain: The domain from which icons are to be scraped.
-//   - squareOnly: If true, only square icons are considered.
-//   - targetHeight: An integer representing the target height of the images to be fetched.
-//   - maxConcurrentProcesses: An integer defining the maximum number of concurrent worker goroutines to be used
-//   - maxConcurrentProcesses:(this should be set from based on the network speed of the machine you are running it on).
-func GetIcon(domain string, config Config) *Icon {
+// Errors that occur are sent to the config.Errors, unless it's nil, in which case, they are logged.
+func GetIcon(config Config, domain string) *Icon {
 	// Create error and warning handler channels if not provided. By default, these are consumed and logged.
 	if config.Errors == nil {
 		config.Errors = make(chan error)
