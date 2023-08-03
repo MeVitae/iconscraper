@@ -16,6 +16,33 @@ import (
 	_ "github.com/mat/besticon/ico"
 )
 
+// svgMimeType is the MIME type of an SVG image
+const svgMimeType = "image/svg+xml"
+
+// xmlMimeType is the MIME type of an XML document
+const xmlMimeType = "text/xml"
+
+// svgDetectionString is the string used to detect if an XML document is an SVG. If it appears
+// within the first 512 bytes, then the document is considered an SVG.
+var svgDetectionString = []byte("<svg")
+
+// detectContentType detects the contenet type of some data, using `http.DetectContentType` and our
+// own SVG detection.
+func detectContentType(data []byte) string {
+	typ := http.DetectContentType(data)
+	if strings.HasPrefix(typ, xmlMimeType) {
+		// If it's an XML document, then try to detect if it's actually an SVG.
+		firstChunk := data
+		if len(firstChunk) > 512 {
+			firstChunk = data[:512]
+		}
+		if bytes.Contains(firstChunk, svgDetectionString) {
+			return svgMimeType
+		}
+	}
+	return typ
+}
+
 // imageWorkers is a collection of goroutines working on getting a parsing images
 //
 // It is not safe for concurrent use (though it does spawn concurrent workers).
@@ -102,16 +129,17 @@ func (workers *imageWorkers) getImage(url string) {
 	}
 	// Check the content type, ingore if it's not an image.
 	body := httpResult.body
-	typ := http.DetectContentType(body)
+	typ := detectContentType(body)
+	if !strings.HasPrefix(typ, "image/") {
+		workers.failureChan <- struct{}{}
+		return
+	}
+
 	var img image.Config
 	var err error
-	// If it is not SVG decode the image config.
-	if !isSVGImage(url) {
-		if !strings.HasPrefix(typ, "image/") {
-			workers.failureChan <- struct{}{}
-			return
-		}
-		// Decode the image properties, and raise an error if this doesn't work.
+	// If it is *not* SVG decode the image config.
+	if typ != svgMimeType {
+		// Decode the image properties, and raise a warning if this doesn't work.
 		img, _, err = image.DecodeConfig(bytes.NewReader(body))
 		if err != nil {
 			workers.warnings <- fmt.Errorf("failed to decode image %s: %w", url, err)
@@ -125,20 +153,6 @@ func (workers *imageWorkers) getImage(url string) {
 		ImageConfig: img,
 		Source:      body,
 	}
-}
-
-// isSVGImage checks if a link is a svg file by looking at their format.
-//
-// isSVG := isSVGImage("/static/images/favicon.svg")
-//
-//	if isSVG {
-//		fmt.Println("Image is SVG")
-//	}else{
-//
-// fmt.Println("Image is not SVG")
-// }
-func isSVGImage(filename string) bool {
-	return strings.HasSuffix(strings.ToLower(filename), ".svg")
 }
 
 // pickBestImage picks the image from the given list that best matches the target size.
@@ -163,7 +177,7 @@ func pickBestImage(config Config, images []Icon) *Icon {
 	for idx := range images {
 		image := &images[idx]
 		// Always prefer SVG icons
-		if config.AllowSvg && isSVGImage(image.URL) {
+		if config.AllowSvg && image.Type == svgMimeType {
 			return image
 		}
 		// Maybe skip non-square images

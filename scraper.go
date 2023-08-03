@@ -33,7 +33,7 @@ type Icon struct {
 	// Type is the sniffed MIME type of the image.
 	Type string
 
-	// Image holds the parsed image config.
+	// Image holds the parsed image config. This is nil for SVGs (type image/svg+xml).
 	ImageConfig image.Config
 
 	// Source is the image source as downloaded.
