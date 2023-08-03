@@ -175,18 +175,14 @@ func couldBeDomain(domain string) bool {
 // the best image back on the result channel, or, if not image was found, it
 // sends back a nil result.
 func processDomain(
+	config Config,
 	domain string,
-	squareOnly bool,
-	targetHeight int,
 	http *httpWorkerPool,
-	warnings,
-	errors chan error,
 	result chan processReturn,
-	allowSvg bool,
 ) {
 	// Check for obvious cases where the domain passed is invalid
 	if !couldBeDomain(domain) {
-		warnings <- fmt.Errorf("Invalid domain name %s", domain)
+		config.Errors <- fmt.Errorf("Invalid domain name %s", domain)
 		result <- processReturn{
 			domain: domain,
 			result: nil,
@@ -197,7 +193,7 @@ func processDomain(
 	httpResult := http.get(url)
 	// Only check for network errors fetching, if it's an error page, that'll do.
 	if httpResult.err != nil {
-		warnings <- fmt.Errorf("Failed to get %s: %w", url, httpResult.err)
+		config.Errors <- fmt.Errorf("Failed to get %s: %w", url, httpResult.err)
 		result <- processReturn{
 			domain: domain,
 			result: nil,
@@ -208,7 +204,7 @@ func processDomain(
 	// Parse the output HTML
 	doc, err := html.Parse(bytes.NewReader(httpResult.body))
 	if err != nil {
-		errors <- fmt.Errorf("Error parsing HTML from %s: %w", url, err)
+		config.Errors <- fmt.Errorf("Error parsing HTML from %s: %w", url, err)
 		result <- processReturn{
 			domain: domain,
 			result: nil,
@@ -220,7 +216,7 @@ func processDomain(
 	redirectDomain := httpResult.url.Host
 	url = "https://" + redirectDomain
 
-	workers := newImageWorkers(redirectDomain, http, errors, warnings)
+	workers := newImageWorkers(redirectDomain, http, config.Errors, config.Warnings)
 	// Always check for `/favicon.ico`, it's not always linked from the HTML.
 	workers.spawn(url + "/favicon.ico")
 	// Spawn workers scraping all the linked icons
@@ -229,6 +225,6 @@ func processDomain(
 	// Pick the best size image from all the results
 	result <- processReturn{
 		domain: domain,
-		result: pickBestImage(squareOnly, targetHeight, workers.results(), allowSvg),
+		result: pickBestImage(config, workers.results()),
 	}
 }

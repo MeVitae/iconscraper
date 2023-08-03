@@ -154,7 +154,7 @@ func isSVGImage(filename string) bool {
 //		targetHeight := 700
 //		bestImage := pickBestImage(squareOnly, targetHeight, images)
 //	    // bestImage.img.Height == 800
-func pickBestImage(squareOnly bool, targetHeight int, images []Icon, allowSvg bool) *Icon {
+func pickBestImage(config Config, images []Icon) *Icon {
 	// Track the largest image
 	var largestImage *Icon
 	// Track the smallest image larger than `targetHeight`
@@ -163,16 +163,16 @@ func pickBestImage(squareOnly bool, targetHeight int, images []Icon, allowSvg bo
 	for idx := range images {
 		image := &images[idx]
 		fmt.Println(image.URL)
-		if allowSvg && isSVGImage(image.URL) {
+		if config.AllowSvg && isSVGImage(image.URL) {
 			return image
 		}
 		// Maybe skip non-square images
-		if squareOnly && image.ImageConfig.Width != image.ImageConfig.Height {
+		if config.SquareOnly && image.ImageConfig.Width != image.ImageConfig.Height {
 			continue
 		}
 
 		// Update `smallestOkImage`
-		diff := image.ImageConfig.Height - targetHeight
+		diff := image.ImageConfig.Height - config.TargetHeight
 		if diff >= 0 {
 			if smallestOkImage == nil || image.ImageConfig.Height < smallestOkImage.ImageConfig.Height {
 				smallestOkImage = image
