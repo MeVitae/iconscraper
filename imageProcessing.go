@@ -96,7 +96,7 @@ func (workers *imageWorkers) getImage(url string) {
 	}
 	// Ignore things that aren't 200 (they won't be the icons!)
 	if httpResult.status != 200 {
-		workers.warnings <- fmt.Errorf("Failed to get icon %s: %d", url, httpResult.status)
+		workers.warnings <- fmt.Errorf("Failed to get icon %s: http %d", url, httpResult.status)
 		workers.failureChan <- struct{}{}
 		return
 	}
@@ -162,7 +162,7 @@ func pickBestImage(config Config, images []Icon) *Icon {
 
 	for idx := range images {
 		image := &images[idx]
-		fmt.Println(image.URL)
+		// Always prefer SVG icons
 		if config.AllowSvg && isSVGImage(image.URL) {
 			return image
 		}

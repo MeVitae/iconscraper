@@ -62,7 +62,9 @@ type Config struct {
 	// The channel must not block.
 	Errors chan error
 
-	// Warnings is the channel for receiving warning.
+	// Warnings is the channel for receiving warning. Errors related to decoding images or resources
+	// not being found on a web server (but the connection being ok) will be reported as warnings
+	// instead of errors.
 	//
 	// If nil, warnings will instead by logged to the default logger.
 	//
@@ -102,7 +104,7 @@ func GetIcons(domains []string, config Config) map[string]Icon {
 
 	// Spawn a goroutine for every domain, these will be rate limited by the http pool.
 	for _, domain := range domains {
-		go processDomain(domain, config.SquareOnly, config.TargetHeight, http, config.Warnings, config.Errors, results, config.AllowSvg)
+		go processDomain(config, domain, http, results)
 	}
 
 	// Collect results
@@ -147,7 +149,7 @@ func GetIcon(domain string, config Config) *Icon {
 	results := make(chan processReturn, 1)
 	defer close(results)
 
-	processDomain(domain, config.SquareOnly, config.TargetHeight, http, config.Warnings, config.Errors, results, config.AllowSvg)
+	go processDomain(config, domain, http, results)
 	return (<-results).result
 }
 
