@@ -51,8 +51,8 @@ type Config struct {
 	// AllowSvg If true, if svg is found svg will be returned.
 	AllowSvg bool
 
-	//MaxConcurrentProcesses An integer defining the maximum number of concurrent worker goroutines to be used.
-	MaxConcurrentProcesses int
+	// MaxConcurrentRequests An integer defining the maximum number of concurrent worker goroutines to be used.
+	MaxConcurrentRequests int
 
 	// Errors is the channel for receiving errors (if left empty a go routine will automatically be created to log the errrors).
 	Errors chan error
@@ -85,7 +85,7 @@ func GetIcons(domains []string, config Config) map[string]Icon {
 	}
 
 	// HTTP worker pool
-	http := newHttpWorkerPool(config.MaxConcurrentProcesses)
+	http := newHttpWorkerPool(config.MaxConcurrentRequests)
 	defer http.close()
 
 	// Channel to collect results
@@ -127,7 +127,7 @@ func GetIcon(domain string, config Config) *Icon {
 	go logWarnings(warnings)
 
 	// HTTP worker pool
-	http := newHttpWorkerPool(config.MaxConcurrentProcesses)
+	http := newHttpWorkerPool(config.MaxConcurrentRequests)
 	defer http.close()
 
 	// Channel to collect results
